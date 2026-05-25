@@ -15,7 +15,7 @@
               </defs>
             </svg>
           </div>
-          <span class="logo-text">安信合同</span>
+          <span class="logo-text">瀹変俊鍚堝悓</span>
         </div>
         
         <el-menu
@@ -23,67 +23,21 @@
           router
           class="sidebar-menu"
         >
-          <el-menu-item index="/dashboard">
+          <el-menu-item
+            v-for="item in visibleMenuItems"
+            :key="item.path"
+            :index="item.path"
+          >
             <div class="menu-item-content">
-              <el-icon><Odometer /></el-icon>
-              <span>仪表盘</span>
-            </div>
-          </el-menu-item>
-          <el-menu-item index="/contracts">
-            <div class="menu-item-content">
-              <el-icon><Document /></el-icon>
-              <span>合同管理</span>
-              <el-badge 
-                v-if="notificationCounts.expiringContracts > 0" 
-                :value="notificationCounts.expiringContracts" 
-                :max="99" 
+              <el-icon><component :is="item.icon" /></el-icon>
+              <span>{{ item.title }}</span>
+              <el-badge
+                v-if="item.badge && item.badge.value > 0"
+                :value="item.badge.value"
+                :max="99"
                 class="menu-badge-icon"
-                type="warning"
+                :type="item.badge.type"
               />
-            </div>
-          </el-menu-item>
-          <el-menu-item index="/customers">
-            <div class="menu-item-content">
-              <el-icon><OfficeBuilding /></el-icon>
-              <span>客户管理</span>
-            </div>
-          </el-menu-item>
-          <el-menu-item index="/approvals">
-            <div class="menu-item-content">
-              <el-icon><Checked /></el-icon>
-              <span>审批管理</span>
-              <el-badge 
-                v-if="notificationCounts.pendingApprovals + notificationCounts.pendingStatusChanges > 0" 
-                :value="notificationCounts.pendingApprovals + notificationCounts.pendingStatusChanges" 
-                :max="99" 
-                class="menu-badge-icon"
-                type="danger"
-              />
-            </div>
-          </el-menu-item>
-          <el-menu-item index="/reminders">
-            <div class="menu-item-content">
-              <el-icon><Bell /></el-icon>
-              <span>到期提醒</span>
-              <el-badge 
-                v-if="notificationCounts.expiringContracts > 0" 
-                :value="notificationCounts.expiringContracts" 
-                :max="99" 
-                class="menu-badge-icon"
-                type="warning"
-              />
-            </div>
-          </el-menu-item>
-          <el-menu-item index="/users">
-            <div class="menu-item-content">
-              <el-icon><UserFilled /></el-icon>
-              <span>用户管理</span>
-            </div>
-          </el-menu-item>
-          <el-menu-item v-if="isAuditAdmin" index="/audit">
-            <div class="menu-item-content">
-              <el-icon><Document /></el-icon>
-              <span>审计日志</span>
             </div>
           </el-menu-item>
         </el-menu>
@@ -95,7 +49,7 @@
             </el-avatar>
             <div class="user-info">
               <div class="user-name">{{ userStore.userInfo?.username }}</div>
-              <div class="user-role">管理员</div>
+              <div class="user-role">{{ getRoleText(userStore.userInfo?.role) }}</div>
             </div>
           </div>
         </div>
@@ -106,15 +60,15 @@
       <el-header>
         <div class="header-left">
           <el-breadcrumb separator="/">
-            <el-breadcrumb-item :to="{ path: '/' }">首页</el-breadcrumb-item>
+            <el-breadcrumb-item :to="{ path: '/' }">棣栭〉</el-breadcrumb-item>
             <el-breadcrumb-item v-if="currentRoute">{{ currentRoute }}</el-breadcrumb-item>
           </el-breadcrumb>
         </div>
         
         <div class="header-right">
           <div class="header-notifications" @click="handleNotificationClick">
-            <el-badge 
-              :value="totalNotifications" 
+            <el-badge
+              :value="totalNotifications"
               :hidden="totalNotifications === 0"
               :max="99"
               type="danger"
@@ -134,11 +88,11 @@
               <el-dropdown-menu>
                 <el-dropdown-item command="profile">
                   <el-icon><User /></el-icon>
-                  个人设置
+                  涓汉璁剧疆
                 </el-dropdown-item>
                 <el-dropdown-item divided command="logout">
                   <el-icon><SwitchButton /></el-icon>
-                  退出登录
+                  閫€鍑虹櫥褰?
                 </el-dropdown-item>
               </el-dropdown-menu>
             </template>
@@ -161,21 +115,36 @@
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/store/user'
+import { routes, hasRouteAccess } from '@/router'
 import { ElMessageBox } from 'element-plus'
 import { getNotificationCounts } from '@/api/approval'
-import { 
-  Odometer, Document, OfficeBuilding, Checked, Bell, 
-  UserFilled, User, ArrowDown, SwitchButton 
+import {
+  Odometer, Document, OfficeBuilding, Checked, Bell,
+  UserFilled, User, ArrowDown, SwitchButton
 } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
 
-const isAuditAdmin = computed(() => {
-  const role = userStore.userInfo?.role
-  return role === 'admin' || role === 'audit_admin'
-})
+const iconMap = {
+  DataAnalysis: Odometer,
+  Document,
+  User: OfficeBuilding,
+  UserFilled,
+  Check: Checked,
+  Bell
+}
+
+const getRoleText = (role) => {
+  const textMap = {
+    admin: '绠＄悊鍛?,
+    manager: '缁忕悊',
+    audit_admin: '瀹¤绠＄悊鍛?,
+    user: '鏅€氱敤鎴?
+  }
+  return textMap[role] || role || '鏈煡'
+}
 
 const totalNotifications = computed(() => {
   const { pendingApprovals, pendingStatusChanges, expiringContracts } = notificationCounts.value
@@ -187,6 +156,43 @@ const notificationCounts = ref({
   pendingStatusChanges: 0,
   expiringContracts: 0,
   total: 0
+})
+
+const getMenuBadge = (path) => {
+  if (path === '/contracts' || path === '/reminders') {
+    return {
+      value: notificationCounts.value.expiringContracts,
+      type: 'warning'
+    }
+  }
+
+  if (path === '/approvals') {
+    return {
+      value: notificationCounts.value.pendingApprovals + notificationCounts.value.pendingStatusChanges,
+      type: 'danger'
+    }
+  }
+
+  return null
+}
+
+const visibleMenuItems = computed(() => {
+  const layoutRoute = routes.find((record) => record.path === '/')
+  const userRole = userStore.userInfo?.role
+
+  return (layoutRoute?.children || [])
+    .filter((record) => !record.meta?.hidden)
+    .filter((record) => hasRouteAccess(record, userRole))
+    .map((record) => {
+      const path = record.path.startsWith('/') ? record.path : `/${record.path}`
+
+      return {
+        path,
+        title: record.meta?.title,
+        icon: iconMap[record.meta?.icon] || Document,
+        badge: getMenuBadge(path)
+      }
+    })
 })
 
 let notificationTimer = null
@@ -213,16 +219,7 @@ onUnmounted(() => {
 
 const activeMenu = computed(() => route.path)
 
-const routeNames = {
-  '/dashboard': '仪表盘',
-  '/contracts': '合同管理',
-  '/customers': '客户管理',
-  '/approvals': '审批管理',
-  '/reminders': '到期提醒',
-  '/users': '用户管理'
-}
-
-const currentRoute = computed(() => routeNames[route.path])
+const currentRoute = computed(() => route.meta?.title)
 
 const handleNotificationClick = () => {
   router.push('/approvals')
@@ -232,20 +229,20 @@ const handleCommand = (command) => {
   if (command === 'profile') {
     ElMessageBox.alert(
       `<div style="padding: 10px;">
-        <p><strong>用户名：</strong>${userStore.userInfo?.username || '-'}</p>
-        <p><strong>邮箱：</strong>${userStore.userInfo?.email || '-'}</p>
-        <p><strong>角色：</strong>${userStore.userInfo?.role === 'admin' ? '管理员' : '普通用户'}</p>
+        <p><strong>鐢ㄦ埛鍚嶏細</strong>${userStore.userInfo?.username || '-'}</p>
+        <p><strong>閭锛?/strong>${userStore.userInfo?.email || '-'}</p>
+        <p><strong>瑙掕壊锛?/strong>${getRoleText(userStore.userInfo?.role)}</p>
       </div>`,
-      '个人设置', 
+      '涓汉璁剧疆',
       {
-        confirmButtonText: '确定',
+        confirmButtonText: '纭畾',
         dangerouslyUseHTMLString: true,
       }
     )
   } else if (command === 'logout') {
-    ElMessageBox.confirm('确定要退出登录吗？', '提示', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
+    ElMessageBox.confirm('纭畾瑕侀€€鍑虹櫥褰曞悧锛?, '鎻愮ず', {
+      confirmButtonText: '纭畾',
+      cancelButtonText: '鍙栨秷',
       type: 'warning'
     }).then(() => {
       userStore.logout()

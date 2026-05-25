@@ -108,7 +108,7 @@ func (s *AuthorizationService) canWorkflow(role string, action Action) (bool, st
 func (s *AuthorizationService) canStatusChanges(role string, action Action) (bool, string) {
 	switch action {
 	case ActionView, ActionApprove, ActionReject:
-		if role == string(models.RoleAdmin) || role == string(models.RoleManager) {
+		if role == string(models.RoleAdmin) {
 			return true, ""
 		}
 		return false, "无权限处理状态变更审批"

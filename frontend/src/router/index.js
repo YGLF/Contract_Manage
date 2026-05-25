@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useUserStore } from '@/store/user'
 
-const routes = [
+export const routes = [
   {
     path: '/login',
     name: 'Login',
@@ -72,6 +72,15 @@ const routes = [
   }
 ]
 
+export const hasRouteAccess = (route, role) => {
+  const records = route.matched?.length ? route.matched : [route]
+
+  return records.every((record) => {
+    const allowedRoles = record.meta?.roles
+    return !allowedRoles?.length || (role && allowedRoles.includes(role))
+  })
+}
+
 const router = createRouter({
   history: createWebHistory(),
   routes
@@ -79,11 +88,15 @@ const router = createRouter({
 
 router.beforeEach((to, from, next) => {
   const userStore = useUserStore()
+  const userRole = userStore.userInfo?.role
+  const requiresAuth = to.matched.some((record) => record.meta?.requiresAuth)
   
-  if (to.meta.requiresAuth && !userStore.token) {
+  if (requiresAuth && !userStore.token) {
     next('/login')
   } else if ((to.path === '/login' || to.path === '/register') && userStore.token) {
     next('/')
+  } else if (!hasRouteAccess(to, userRole)) {
+    next('/dashboard')
   } else {
     next()
   }

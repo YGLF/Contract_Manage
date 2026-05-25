@@ -85,7 +85,13 @@ func (h *WorkflowHandler) Approve(c *gin.Context) {
 		return
 	}
 
-	err := h.workflowService.Approve(input.WorkflowID, input.Level, uint64(userID), input.Comment)
+	role, exists := middleware.GetCurrentUserRole(c)
+	if !exists || role == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User role not found"})
+		return
+	}
+
+	err := h.workflowService.Approve(input.WorkflowID, input.Level, uint64(userID), role, input.Comment)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -112,7 +118,13 @@ func (h *WorkflowHandler) Reject(c *gin.Context) {
 		return
 	}
 
-	err := h.workflowService.Reject(input.WorkflowID, input.Level, uint64(userID), input.Comment)
+	role, exists := middleware.GetCurrentUserRole(c)
+	if !exists || role == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User role not found"})
+		return
+	}
+
+	err := h.workflowService.Reject(input.WorkflowID, input.Level, uint64(userID), role, input.Comment)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

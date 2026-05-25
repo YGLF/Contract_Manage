@@ -121,7 +121,12 @@ func TestAuthorizationService_ApprovalPermissions(t *testing.T) {
 	}
 
 	allowed, _ = svc.CanRole(string(models.RoleManager), ResourceStatusChanges, ActionApprove)
+	if allowed {
+		t.Fatal("expected manager to be denied status change approval")
+	}
+
+	allowed, _ = svc.CanRole(string(models.RoleAdmin), ResourceStatusChanges, ActionApprove)
 	if !allowed {
-		t.Fatal("expected manager to approve status change requests")
+		t.Fatal("expected admin to approve status change requests")
 	}
 }

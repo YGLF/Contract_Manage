@@ -482,6 +482,67 @@ func TestContractService_StatusChangeRequest(t *testing.T) {
 			t.Error("CreateStatusChangeRequest() should prevent duplicate pending requests")
 		}
 	})
+
+	t.Run("reject status change approval for unauthorized role", func(t *testing.T) {
+		contract2 := models.Contract{
+			ContractNo:     "CR002",
+			Title:          "状态变更越权测试",
+			CustomerID:     1,
+			ContractTypeID: 1,
+			CreatorID:      1,
+			Status:         models.StatusActive,
+		}
+		models.DB.Create(&contract2)
+
+		request, err := service.CreateStatusChangeRequest(contract2.ID, StatusChangeRequestInput{
+			ToStatus: "archived",
+			Reason:   "越权审批测试",
+		}, 1)
+		if err != nil {
+			t.Fatalf("CreateStatusChangeRequest() error = %v", err)
+		}
+
+		_, err = service.ApproveStatusChangeRequest(request.ID, 1, string(models.RoleUser), "普通用户无权审批")
+		if err == nil {
+			t.Fatal("ApproveStatusChangeRequest() expected error for unauthorized role")
+		}
+	})
+
+	t.Run("approve status change for authorized role", func(t *testing.T) {
+		contract3 := models.Contract{
+			ContractNo:     "CR003",
+			Title:          "状态变更审批测试",
+			CustomerID:     1,
+			ContractTypeID: 1,
+			CreatorID:      1,
+			Status:         models.StatusActive,
+		}
+		models.DB.Create(&contract3)
+
+		request, err := service.CreateStatusChangeRequest(contract3.ID, StatusChangeRequestInput{
+			ToStatus: "archived",
+			Reason:   "正常审批测试",
+		}, 1)
+		if err != nil {
+			t.Fatalf("CreateStatusChangeRequest() error = %v", err)
+		}
+
+		result, err := service.ApproveStatusChangeRequest(request.ID, 1, string(models.RoleAdmin), "管理员批准")
+		if err != nil {
+			t.Fatalf("ApproveStatusChangeRequest() error = %v", err)
+		}
+		if result.Status != "approved" {
+			t.Fatalf("ApproveStatusChangeRequest() status = %v, want approved", result.Status)
+		}
+
+		updatedContract, err := service.GetContractByID(contract3.ID)
+		if err != nil {
+			t.Fatalf("GetContractByID() error = %v", err)
+		}
+		if updatedContract.Status != models.StatusArchived {
+			t.Fatalf("contract status = %v, want %v", updatedContract.Status, models.StatusArchived)
+		}
+	})
 }
 
 func TestContractService_LifecycleEvents(t *testing.T) {

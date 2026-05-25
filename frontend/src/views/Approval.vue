@@ -46,7 +46,7 @@
       </el-table>
     </el-card>
 
-    <el-card style="margin-top: 20px" v-if="userRole === 'admin' || userRole === 'manager'">
+    <el-card style="margin-top: 20px" v-if="userRole === 'admin'">
       <template #header>
         <div class="header">
           <span>状态变更审批</span>
@@ -219,7 +219,7 @@ const loadData = async () => {
     loading.value = false
   }
   
-  if (userRole === 'admin' || userRole === 'manager') {
+  if (userRole === 'admin') {
     statusChangeLoading.value = true
     try {
       const data = await getPendingStatusChangeApprovals()

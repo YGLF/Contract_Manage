@@ -90,7 +90,7 @@ func (s *WorkflowService) GetWorkflowByContractID(contractID uint64) (*models.Ap
 	return &workflow, nil
 }
 
-func (s *WorkflowService) Approve(workflowID uint64, level int, approverID uint64, comment string) error {
+func (s *WorkflowService) Approve(workflowID uint64, level int, approverID uint64, approverRole string, comment string) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		var workflow models.ApprovalWorkflow
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&workflow, workflowID).Error; err != nil {
@@ -109,6 +109,9 @@ func (s *WorkflowService) Approve(workflowID uint64, level int, approverID uint6
 
 		if approval.Status != models.WorkflowStatusPending {
 			return gorm.ErrRecordNotFound
+		}
+		if approval.ApproverRole != approverRole {
+			return fmt.Errorf("当前角色%s无权处理第%d级审批，需角色%s", approverRole, level, approval.ApproverRole)
 		}
 
 		now := time.Now()
@@ -148,7 +151,7 @@ func (s *WorkflowService) Approve(workflowID uint64, level int, approverID uint6
 	})
 }
 
-func (s *WorkflowService) Reject(workflowID uint64, level int, approverID uint64, comment string) error {
+func (s *WorkflowService) Reject(workflowID uint64, level int, approverID uint64, approverRole string, comment string) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		var workflow models.ApprovalWorkflow
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&workflow, workflowID).Error; err != nil {
@@ -167,6 +170,9 @@ func (s *WorkflowService) Reject(workflowID uint64, level int, approverID uint64
 
 		if approval.Status != models.WorkflowStatusPending {
 			return gorm.ErrRecordNotFound
+		}
+		if approval.ApproverRole != approverRole {
+			return fmt.Errorf("当前角色%s无权处理第%d级审批，需角色%s", approverRole, level, approval.ApproverRole)
 		}
 
 		now := time.Now()

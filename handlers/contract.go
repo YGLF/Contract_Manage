@@ -6,6 +6,7 @@ import (
 	"contract-manage/middleware"
 	"contract-manage/models"
 	"contract-manage/services"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,6 +19,43 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+const (
+	maxDocumentUploadSize = 10 * 1024 * 1024
+	maxDocxEntryBytes     = 5 * 1024 * 1024
+	maxDocxExtractedBytes = 20 * 1024 * 1024
+	maxDocxArchiveEntries = 128
+)
+
+var allowedDocumentExtensions = map[string]struct{}{
+	".pdf":  {},
+	".doc":  {},
+	".docx": {},
+	".xls":  {},
+	".xlsx": {},
+	".jpg":  {},
+	".jpeg": {},
+	".png":  {},
+	".gif":  {},
+	".bmp":  {},
+	".webp": {},
+	".txt":  {},
+}
+
+var previewableDocumentExtensions = map[string]struct{}{
+	".pdf":  {},
+	".doc":  {},
+	".docx": {},
+	".xls":  {},
+	".xlsx": {},
+	".jpg":  {},
+	".jpeg": {},
+	".png":  {},
+	".gif":  {},
+	".bmp":  {},
+	".webp": {},
+	".txt":  {},
+}
 
 type ContractHandler struct {
 	contractService *services.ContractService
@@ -215,8 +253,17 @@ func (h *ContractHandler) CreateContractDocument(c *gin.Context) {
 	}
 
 	filename := filepath.Base(file.Filename)
+	fileExt := strings.ToLower(filepath.Ext(filename))
 	if filename == "." || filename == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "非法文件名"})
+		return
+	}
+	if !isAllowedDocumentExtension(fileExt) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "不支持上传该文件类型"})
+		return
+	}
+	if file.Size > maxDocumentUploadSize {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "文件大小不能超过 10MB"})
 		return
 	}
 	uploadDir := config.AppConfig.UploadDir
@@ -241,7 +288,7 @@ func (h *ContractHandler) CreateContractDocument(c *gin.Context) {
 		Name:       filename,
 		FilePath:   "/" + filePath,
 		FileSize:   int(file.Size),
-		FileType:   filepath.Ext(filename)[1:],
+		FileType:   strings.TrimPrefix(fileExt, "."),
 	}
 
 	userID, exists := middleware.GetCurrentUserID(c)
@@ -284,6 +331,11 @@ func (h *ContractHandler) PreviewDocument(c *gin.Context) {
 	// 根据文件类型返回不同的内容
 	fileExt := strings.ToLower(filepath.Ext(document.Name))
 
+	if !isPreviewableDocumentExtension(fileExt) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "不支持预览该文件类型"})
+		return
+	}
+
 	// Word 文档 (.docx) 返回纯文本内容
 	if fileExt == ".docx" {
 		text, err := extractTextFromDocx(absFilePath)
@@ -308,13 +360,19 @@ func (h *ContractHandler) PreviewDocument(c *gin.Context) {
 	case ".pdf":
 		// PDF 文件直接返回
 		c.Header("Content-Type", "application/pdf")
+		c.Header("Content-Disposition", fmt.Sprintf("inline; filename=\"%s\"", document.Name))
 		c.File(absFilePath)
 	case ".doc":
 		// Word 文档返回文件内容
-		c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+		c.Header("Content-Type", "application/msword")
 		c.Header("Content-Disposition", fmt.Sprintf("inline; filename=\"%s\"", document.Name))
 		c.File(absFilePath)
-	case ".xls", ".xlsx":
+	case ".xls":
+		// Excel 文件返回文件内容
+		c.Header("Content-Type", "application/vnd.ms-excel")
+		c.Header("Content-Disposition", fmt.Sprintf("inline; filename=\"%s\"", document.Name))
+		c.File(absFilePath)
+	case ".xlsx":
 		// Excel 文件返回文件内容
 		c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 		c.Header("Content-Disposition", fmt.Sprintf("inline; filename=\"%s\"", document.Name))
@@ -341,11 +399,9 @@ func (h *ContractHandler) PreviewDocument(c *gin.Context) {
 		})
 		return
 	case ".html", ".htm":
-		// HTML 文件返回内容
-		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.File(absFilePath)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "不支持预览该文件类型"})
 	default:
-		c.JSON(http.StatusBadRequest, gin.H{"error": "不支持的文件类型: " + fileExt})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "不支持预览该文件类型"})
 	}
 }
 
@@ -486,13 +542,19 @@ func (h *ContractHandler) UploadContractTemplate(c *gin.Context) {
 	}
 	defer file.Close()
 
-	ext := strings.ToLower(filepath.Ext(header.Filename))
+	filenameOnly := filepath.Base(header.Filename)
+	if filenameOnly == "." || filenameOnly == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "非法文件名"})
+		return
+	}
+
+	ext := strings.ToLower(filepath.Ext(filenameOnly))
 	if ext != ".docx" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "仅支持 .docx 格式文件"})
 		return
 	}
 
-	if header.Size > 10*1024*1024 {
+	if header.Size > maxDocumentUploadSize {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "文件大小不能超过 10MB"})
 		return
 	}
@@ -503,7 +565,7 @@ func (h *ContractHandler) UploadContractTemplate(c *gin.Context) {
 		return
 	}
 
-	filename := fmt.Sprintf("%d_%s", time.Now().Unix(), header.Filename)
+	filename := fmt.Sprintf("%d_%s", time.Now().Unix(), filenameOnly)
 	filePath := filepath.Join(uploadDir, filename)
 
 	out, err := os.Create(filePath)
@@ -560,34 +622,80 @@ func extractTextFromDocx(filePath string) (string, error) {
 	}
 	defer r.Close()
 
+	if len(r.File) > maxDocxArchiveEntries {
+		return "", errors.New("docx 压缩包条目数超出限制")
+	}
+
 	var text strings.Builder
+	var totalExtracted uint64
+	var documentFile *zip.File
 
 	for _, file := range r.File {
+		if file.FileInfo().IsDir() {
+			continue
+		}
+
+		if file.UncompressedSize64 > uint64(maxDocxEntryBytes) {
+			return "", errors.New("docx 压缩包内容超出限制")
+		}
+
+		totalExtracted += file.UncompressedSize64
+		if totalExtracted > uint64(maxDocxExtractedBytes) {
+			return "", errors.New("docx 压缩包内容超出限制")
+		}
+
 		if file.Name == "word/document.xml" {
-			rc, err := file.Open()
-			if err != nil {
-				return "", err
-			}
-			defer rc.Close()
+			documentFile = file
+		}
+	}
 
-			content, err := io.ReadAll(rc)
-			if err != nil {
-				return "", err
-			}
+	if documentFile == nil {
+		return "", nil
+	}
 
-			re := regexp.MustCompile(`<w:t[^>]*>([^<]*)</w:t>`)
-			matches := re.FindAllStringSubmatch(string(content), -1)
-			for _, match := range matches {
-				if len(match) > 1 {
-					text.WriteString(match[1])
-					text.WriteString(" ")
-				}
-			}
-			break
+	content, err := readZipEntryWithLimit(documentFile, int64(maxDocxEntryBytes))
+	if err != nil {
+		return "", err
+	}
+
+	re := regexp.MustCompile(`<w:t[^>]*>([^<]*)</w:t>`)
+	matches := re.FindAllStringSubmatch(string(content), -1)
+	for _, match := range matches {
+		if len(match) > 1 {
+			text.WriteString(match[1])
+			text.WriteString(" ")
 		}
 	}
 
 	return text.String(), nil
+}
+
+func isAllowedDocumentExtension(ext string) bool {
+	_, ok := allowedDocumentExtensions[strings.ToLower(ext)]
+	return ok
+}
+
+func isPreviewableDocumentExtension(ext string) bool {
+	_, ok := previewableDocumentExtensions[strings.ToLower(ext)]
+	return ok
+}
+
+func readZipEntryWithLimit(file *zip.File, limit int64) ([]byte, error) {
+	rc, err := file.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer rc.Close()
+
+	content, err := io.ReadAll(io.LimitReader(rc, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(content)) > limit {
+		return nil, errors.New("docx 压缩包内容超出限制")
+	}
+
+	return content, nil
 }
 
 func contentToString(content interface{}) string {
@@ -756,7 +864,13 @@ func (h *ContractHandler) ApproveStatusChangeRequest(c *gin.Context) {
 		return
 	}
 
-	result, err := h.contractService.ApproveStatusChangeRequest(uint(requestID), userID, input.Comment)
+	role, exists := middleware.GetCurrentUserRole(c)
+	if !exists || role == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User role not found"})
+		return
+	}
+
+	result, err := h.contractService.ApproveStatusChangeRequest(uint(requestID), userID, role, input.Comment)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -786,7 +900,13 @@ func (h *ContractHandler) RejectStatusChangeRequest(c *gin.Context) {
 		return
 	}
 
-	result, err := h.contractService.RejectStatusChangeRequest(uint(requestID), userID, input.Comment)
+	role, exists := middleware.GetCurrentUserRole(c)
+	if !exists || role == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User role not found"})
+		return
+	}
+
+	result, err := h.contractService.RejectStatusChangeRequest(uint(requestID), userID, role, input.Comment)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

@@ -18,6 +18,10 @@ func NewContractService() *ContractService {
 	return &ContractService{}
 }
 
+func (s *ContractService) canApproveStatusChange(role string) bool {
+	return role == string(models.RoleAdmin)
+}
+
 var (
 	ErrControlledContractStatusChange = errors.New("合同关键状态为受控字段，请通过审批流或状态变更申请修改")
 	ErrUnsupportedStatusChangeTarget  = errors.New("目标状态不支持通过当前入口变更")
@@ -619,7 +623,7 @@ func (s *ContractService) GetPendingStatusChangeRequests(role string) ([]models.
 	var requests []models.StatusChangeRequest
 	query := models.DB.Preload("Contract.Customer").Preload("Requester").Order("created_at DESC")
 
-	if role == "manager" || role == "admin" {
+	if role == string(models.RoleAdmin) {
 		query = query.Where("status = ?", "pending")
 	}
 
@@ -629,7 +633,11 @@ func (s *ContractService) GetPendingStatusChangeRequests(role string) ([]models.
 	return requests, nil
 }
 
-func (s *ContractService) ApproveStatusChangeRequest(requestID uint, approverID uint, comment string) (*models.StatusChangeRequest, error) {
+func (s *ContractService) ApproveStatusChangeRequest(requestID uint, approverID uint, approverRole string, comment string) (*models.StatusChangeRequest, error) {
+	if !s.canApproveStatusChange(approverRole) {
+		return nil, fmt.Errorf("当前角色无权审批状态变更申请")
+	}
+
 	var request models.StatusChangeRequest
 	if err := models.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&request, requestID).Error; err != nil {
@@ -667,7 +675,11 @@ func (s *ContractService) ApproveStatusChangeRequest(requestID uint, approverID 
 	return &request, nil
 }
 
-func (s *ContractService) RejectStatusChangeRequest(requestID uint, approverID uint, comment string) (*models.StatusChangeRequest, error) {
+func (s *ContractService) RejectStatusChangeRequest(requestID uint, approverID uint, approverRole string, comment string) (*models.StatusChangeRequest, error) {
+	if !s.canApproveStatusChange(approverRole) {
+		return nil, fmt.Errorf("当前角色无权审批状态变更申请")
+	}
+
 	var request models.StatusChangeRequest
 	if err := models.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&request, requestID).Error; err != nil {

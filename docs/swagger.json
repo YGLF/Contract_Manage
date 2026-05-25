@@ -43,7 +43,7 @@
     "/api/auth/register": {
       "post": {
         "summary": "用户注册",
-        "description": "注册新用户账号",
+        "description": "注册新用户账号。服务端会按普通用户(user)创建，忽略客户端提交的高权限角色。",
         "tags": ["用户管理"],
         "parameters": [
           {
@@ -58,7 +58,7 @@
                 "email": {"type": "string", "example": "test@example.com"},
                 "password": {"type": "string", "example": "password123"},
                 "full_name": {"type": "string", "example": "张三"},
-                "role": {"type": "string", "enum": ["user", "manager", "admin"], "default": "user"}
+                "role": {"type": "string", "enum": ["user", "manager", "admin", "audit_admin"], "default": "user"}
               }
             }
           }
@@ -543,7 +543,7 @@
     },
     "/api/pending-status-changes": {
       "get": {
-        "summary": "获取待审批状态变更列表",
+        "summary": "获取待审批状态变更列表（管理员）",
         "tags": ["审批管理"],
         "security": [{"Bearer": []}],
         "responses": {
@@ -553,7 +553,7 @@
     },
     "/api/status-change-requests/{request_id}/approve": {
       "post": {
-        "summary": "审批通过状态变更",
+        "summary": "审批通过状态变更（管理员）",
         "tags": ["审批管理"],
         "security": [{"Bearer": []}],
         "parameters": [
@@ -566,7 +566,7 @@
     },
     "/api/status-change-requests/{request_id}/reject": {
       "post": {
-        "summary": "拒绝状态变更",
+        "summary": "拒绝状态变更（管理员）",
         "tags": ["审批管理"],
         "security": [{"Bearer": []}],
         "parameters": [
