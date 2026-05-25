@@ -26,6 +26,10 @@ func GetAuditService() *services.AuditService {
 }
 
 func (h *AuditHandler) GetAuditLogs(c *gin.Context) {
+	if !middleware.AuthorizeRequest(c, services.ResourceAuditLogs, services.ActionView) {
+		return
+	}
+
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 	username := c.Query("username")
@@ -56,9 +60,7 @@ func (h *AuditHandler) GetAuditLogs(c *gin.Context) {
 }
 
 func (h *AuditHandler) DeleteAuditLog(c *gin.Context) {
-	role, _ := middleware.GetCurrentUserRole(c)
-	if role != "admin" && role != "audit_admin" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "无权限删除审计日志，仅审计管理员可操作"})
+	if !middleware.AuthorizeRequest(c, services.ResourceAuditLogs, services.ActionDelete) {
 		return
 	}
 
@@ -68,18 +70,14 @@ func (h *AuditHandler) DeleteAuditLog(c *gin.Context) {
 		return
 	}
 
-	if err := h.auditService.DeleteAuditLog(uint(id)); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "删除成功"})
+	c.JSON(http.StatusForbidden, gin.H{
+		"error": "审计日志不允许物理删除",
+		"id":    id,
+	})
 }
 
 func (h *AuditHandler) DeleteAuditLogs(c *gin.Context) {
-	role, _ := middleware.GetCurrentUserRole(c)
-	if role != "admin" && role != "audit_admin" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "无权限删除审计日志，仅审计管理员可操作"})
+	if !middleware.AuthorizeRequest(c, services.ResourceAuditLogs, services.ActionDelete) {
 		return
 	}
 
@@ -91,15 +89,17 @@ func (h *AuditHandler) DeleteAuditLogs(c *gin.Context) {
 		return
 	}
 
-	if err := h.auditService.DeleteAuditLogs(input.IDs); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "批量删除成功"})
+	c.JSON(http.StatusForbidden, gin.H{
+		"error": "审计日志不允许物理删除",
+		"ids":   input.IDs,
+	})
 }
 
 func (h *AuditHandler) ExportAuditLogs(c *gin.Context) {
+	if !middleware.AuthorizeRequest(c, services.ResourceAuditLogs, services.ActionExport) {
+		return
+	}
+
 	username := c.Query("username")
 	action := c.Query("action")
 	module := c.Query("module")
@@ -129,9 +129,12 @@ func AuditLogMiddleware(auditService *services.AuditService) gin.HandlerFunc {
 		}
 
 		userID, _ := middleware.GetCurrentUserID(c)
-		username, _ := c.Get("username")
+		username, ok := middleware.GetCurrentUsername(c)
 
 		if userID == 0 {
+			return
+		}
+		if !ok || username == "" {
 			return
 		}
 
@@ -143,7 +146,7 @@ func AuditLogMiddleware(auditService *services.AuditService) gin.HandlerFunc {
 
 		log := models.AuditLog{
 			UserID:    userID,
-			Username:  username.(string),
+			Username:  username,
 			Action:    action,
 			Module:    module,
 			Method:    c.Request.Method,
@@ -162,6 +165,9 @@ func AuditLogMiddleware(auditService *services.AuditService) gin.HandlerFunc {
 func getModuleFromPath(path string) string {
 	if strings.Contains(path, "/auth/") {
 		return "auth"
+	}
+	if strings.Contains(path, "/audit-logs") {
+		return "audit"
 	}
 	if strings.Contains(path, "/contracts") {
 		return "contract"

@@ -98,7 +98,11 @@ func (h *ContractHandler) UpdateContract(c *gin.Context) {
 
 	contract, err := h.contractService.UpdateContract(uint(id), input)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Contract not found"})
+		status := http.StatusBadRequest
+		if err.Error() == "record not found" {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -210,7 +214,11 @@ func (h *ContractHandler) CreateContractDocument(c *gin.Context) {
 		return
 	}
 
-	filename := file.Filename
+	filename := filepath.Base(file.Filename)
+	if filename == "." || filename == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "非法文件名"})
+		return
+	}
 	uploadDir := config.AppConfig.UploadDir
 	if uploadDir == "" {
 		uploadDir = "uploads"
@@ -265,7 +273,7 @@ func (h *ContractHandler) PreviewDocument(c *gin.Context) {
 	}
 
 	// 构建绝对文件路径
-	absFilePath := filepath.Join(".", document.FilePath)
+	absFilePath := filepath.Join(".", strings.TrimPrefix(document.FilePath, "/"))
 
 	// 检查文件是否存在
 	if _, err := os.Stat(absFilePath); os.IsNotExist(err) {
@@ -425,13 +433,20 @@ func (h *ContractHandler) UpdateContractStatus(c *gin.Context) {
 		return
 	}
 
-	contract, err := h.contractService.UpdateContractStatus(uint(contractID), input.Status, userID)
+	request, err := h.contractService.CreateStatusChangeRequest(uint(contractID), services.StatusChangeRequestInput{
+		ToStatus: input.Status,
+		Reason:   input.Description,
+	}, userID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, contract)
+	c.JSON(http.StatusAccepted, gin.H{
+		"direct":  false,
+		"request": request,
+		"message": "关键状态变更已转为审批申请，待审核后生效",
+	})
 }
 
 func (h *ContractHandler) ArchiveContract(c *gin.Context) {
@@ -447,13 +462,20 @@ func (h *ContractHandler) ArchiveContract(c *gin.Context) {
 		return
 	}
 
-	contract, err := h.contractService.ArchiveContract(uint(contractID), userID)
+	request, err := h.contractService.CreateStatusChangeRequest(uint(contractID), services.StatusChangeRequestInput{
+		ToStatus: string(models.StatusArchived),
+		Reason:   "归档申请",
+	}, userID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, contract)
+	c.JSON(http.StatusAccepted, gin.H{
+		"direct":  false,
+		"request": request,
+		"message": "归档已转为状态变更申请，待审核后生效",
+	})
 }
 
 func (h *ContractHandler) UploadContractTemplate(c *gin.Context) {
@@ -673,29 +695,9 @@ func (h *ContractHandler) CreateStatusChangeRequest(c *gin.Context) {
 		return
 	}
 
-	if !h.contractService.IsStatusChangeRequireApproval(input.ToStatus) {
-		contract, err := h.contractService.UpdateContractStatus(uint(contractID), input.ToStatus, userID)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"direct": true, "contract": contract})
-		return
-	}
-
 	request, err := h.contractService.CreateStatusChangeRequest(uint(contractID), input, userID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	if request == nil {
-		contract, err := h.contractService.UpdateContractStatus(uint(contractID), input.ToStatus, userID)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"direct": true, "contract": contract})
 		return
 	}
 

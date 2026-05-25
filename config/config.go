@@ -43,18 +43,18 @@ func LoadConfig() error {
 	viper.SetDefault("MYSQL_HOST", "localhost")
 	viper.SetDefault("MYSQL_PORT", 3306)
 	viper.SetDefault("MYSQL_USER", "root")
-	viper.SetDefault("MYSQL_PASSWORD", "rootroots")
+	viper.SetDefault("MYSQL_PASSWORD", "")
 	viper.SetDefault("MYSQL_DATABASE", "contract_manage")
 	viper.SetDefault("JWT_ALGORITHM", "HS256")
 	viper.SetDefault("ACCESS_TOKEN_EXPIRE_MINUTES", 30)
 	viper.SetDefault("UPLOAD_DIR", "uploads")
 
 	viper.SetDefault("ADMIN_USERNAME", "admin")
-	viper.SetDefault("ADMIN_PASSWORD", "admin123")
+	viper.SetDefault("ADMIN_PASSWORD", "")
 	viper.SetDefault("ADMIN_EMAIL", "admin@example.com")
 
 	viper.SetDefault("AUDIT_ADMIN_USERNAME", "auditadmin")
-	viper.SetDefault("AUDIT_ADMIN_PASSWORD", "audit123")
+	viper.SetDefault("AUDIT_ADMIN_PASSWORD", "")
 	viper.SetDefault("AUDIT_ADMIN_EMAIL", "audit@example.com")
 
 	if err := viper.ReadInConfig(); err != nil {
@@ -110,8 +110,12 @@ func validateConfig() error {
 	AppConfig.MysqlUser = strings.TrimSpace(AppConfig.MysqlUser)
 	AppConfig.AdminUsername = strings.TrimSpace(AppConfig.AdminUsername)
 
-	if AppConfig.AdminPassword == "admin123" {
-		fmt.Println("WARNING: Using default admin password. Please change it in production!")
+	if len(AppConfig.AdminPassword) < 8 {
+		return fmt.Errorf("ADMIN_PASSWORD must be at least 8 characters")
+	}
+
+	if len(AppConfig.AuditAdminPassword) < 8 {
+		return fmt.Errorf("AUDIT_ADMIN_PASSWORD must be at least 8 characters")
 	}
 
 	return nil

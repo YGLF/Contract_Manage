@@ -2,6 +2,7 @@ package services
 
 import (
 	"contract-manage/models"
+	"fmt"
 	"os"
 	"testing"
 
@@ -289,8 +290,8 @@ func TestUserService_GetUsers(t *testing.T) {
 
 	for i := 0; i < 5; i++ {
 		service.CreateUser(UserCreateInput{
-			Username: "listuser",
-			Email:    "",
+			Username: fmt.Sprintf("listuser%d", i),
+			Email:    fmt.Sprintf("listuser%d@example.com", i),
 			Password: "password",
 		})
 	}

@@ -316,18 +316,25 @@ func TestContractService_UpdateContractStatus(t *testing.T) {
 	}
 	models.DB.Create(&contract)
 
-	t.Run("update contract status", func(t *testing.T) {
+	t.Run("reject controlled status direct update", func(t *testing.T) {
 		updated, err := service.UpdateContractStatus(contract.ID, "active", 1)
-		if err != nil {
-			t.Errorf("UpdateContractStatus() error = %v", err)
-			return
+		if err == nil {
+			t.Fatal("UpdateContractStatus() expected error for controlled status direct update")
 		}
-		if updated.Status != models.StatusActive {
-			t.Errorf("UpdateContractStatus() status = %v, want %v", updated.Status, models.StatusActive)
+		if updated != nil {
+			t.Fatal("UpdateContractStatus() should not return updated contract on rejection")
+		}
+
+		current, getErr := service.GetContractByID(contract.ID)
+		if getErr != nil {
+			t.Fatalf("GetContractByID() error = %v", getErr)
+		}
+		if current.Status != models.StatusDraft {
+			t.Errorf("contract status = %v, want %v", current.Status, models.StatusDraft)
 		}
 	})
 
-	t.Run("verify lifecycle event", func(t *testing.T) {
+	t.Run("verify no lifecycle event created on rejected direct update", func(t *testing.T) {
 		events, err := service.GetLifecycleEvents(contract.ID)
 		if err != nil {
 			t.Errorf("GetLifecycleEvents() error = %v", err)
@@ -340,8 +347,8 @@ func TestContractService_UpdateContractStatus(t *testing.T) {
 				break
 			}
 		}
-		if !found {
-			t.Error("UpdateContractStatus() should create status_changed lifecycle event")
+		if found {
+			t.Error("UpdateContractStatus() should not create status_changed lifecycle event when direct update is rejected")
 		}
 	})
 }
@@ -362,18 +369,17 @@ func TestContractService_ArchiveContract(t *testing.T) {
 	}
 	models.DB.Create(&contract)
 
-	t.Run("archive contract", func(t *testing.T) {
+	t.Run("archive contract requires controlled status path", func(t *testing.T) {
 		archived, err := service.ArchiveContract(contract.ID, 1)
-		if err != nil {
-			t.Errorf("ArchiveContract() error = %v", err)
-			return
+		if err == nil {
+			t.Fatal("ArchiveContract() expected error for controlled status direct archive")
 		}
-		if archived.Status != models.StatusArchived {
-			t.Errorf("ArchiveContract() status = %v, want %v", archived.Status, models.StatusArchived)
+		if archived != nil {
+			t.Fatal("ArchiveContract() should not return archived contract on rejection")
 		}
 	})
 
-	t.Run("verify lifecycle event", func(t *testing.T) {
+	t.Run("verify no archive lifecycle event on rejected direct archive", func(t *testing.T) {
 		events, _ := service.GetLifecycleEvents(contract.ID)
 		found := false
 		for _, e := range events {
@@ -382,8 +388,8 @@ func TestContractService_ArchiveContract(t *testing.T) {
 				break
 			}
 		}
-		if !found {
-			t.Error("ArchiveContract() should create archived lifecycle event")
+		if found {
+			t.Error("ArchiveContract() should not create archived lifecycle event when direct archive is rejected")
 		}
 	})
 }
@@ -401,7 +407,7 @@ func TestContractService_IsStatusChangeRequireApproval(t *testing.T) {
 		{"pending_pay", true},
 		{"draft", false},
 		{"active", false},
-		{"completed", false},
+		{"completed", true},
 	}
 
 	for _, tt := range tests {
@@ -452,18 +458,17 @@ func TestContractService_StatusChangeRequest(t *testing.T) {
 		}
 	})
 
-	t.Run("status change that doesn't need approval", func(t *testing.T) {
+	t.Run("status change outside approval entry is rejected", func(t *testing.T) {
 		request, err := service.CreateStatusChangeRequest(contract.ID, StatusChangeRequestInput{
 			ToStatus: "draft",
 			Reason:   "退回草稿",
 		}, 1)
 
-		if err != nil {
-			t.Errorf("CreateStatusChangeRequest() error = %v", err)
-			return
+		if err == nil {
+			t.Fatal("CreateStatusChangeRequest() expected error for unsupported non-approval status entry")
 		}
 		if request != nil {
-			t.Error("CreateStatusChangeRequest() should return nil for non-approval status")
+			t.Error("CreateStatusChangeRequest() should return nil when request creation is rejected")
 		}
 	})
 

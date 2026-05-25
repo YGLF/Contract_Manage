@@ -6,10 +6,10 @@ services:
     container_name: contract_mysql
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: root123456
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: contract_manage
-      MYSQL_USER: contract_user
-      MYSQL_PASSWORD: contract123
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       TZ: Asia/Shanghai
     ports:
       - "3306:3306"
@@ -32,10 +32,12 @@ services:
     environment:
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
-      MYSQL_USER: contract_user
-      MYSQL_PASSWORD: contract123
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       MYSQL_DATABASE: contract_manage
-      SECRET_KEY: your-secret-key-change-in-production
+      SECRET_KEY: ${SECRET_KEY}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      AUDIT_ADMIN_PASSWORD: ${AUDIT_ADMIN_PASSWORD}
     ports:
       - "8000:8000"
     volumes:

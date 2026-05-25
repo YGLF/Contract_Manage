@@ -2,6 +2,8 @@ package models
 
 import (
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"contract-manage/config"
@@ -284,6 +286,43 @@ type AuditLog struct {
 
 var DB *gorm.DB
 
+var managedSchemaModels = []interface{}{
+	&User{},
+	&Role{},
+	&Customer{},
+	&ContractType{},
+	&Contract{},
+	&ContractExecution{},
+	&ApprovalRecord{},
+	&Document{},
+	&ContractLifecycleEvent{},
+	&Reminder{},
+	&StatusChangeRequest{},
+	&AuditLog{},
+	&ApprovalWorkflow{},
+	&WorkflowApproval{},
+}
+
+var managedSchemaTables = []struct {
+	name  string
+	model interface{}
+}{
+	{name: "users", model: &User{}},
+	{name: "roles", model: &Role{}},
+	{name: "customers", model: &Customer{}},
+	{name: "contract_types", model: &ContractType{}},
+	{name: "contracts", model: &Contract{}},
+	{name: "contract_executions", model: &ContractExecution{}},
+	{name: "approval_records", model: &ApprovalRecord{}},
+	{name: "documents", model: &Document{}},
+	{name: "contract_lifecycle_events", model: &ContractLifecycleEvent{}},
+	{name: "reminders", model: &Reminder{}},
+	{name: "status_change_requests", model: &StatusChangeRequest{}},
+	{name: "audit_logs", model: &AuditLog{}},
+	{name: "approval_workflows", model: &ApprovalWorkflow{}},
+	{name: "workflow_approvals", model: &WorkflowApproval{}},
+}
+
 func InitDB() error {
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local",
 		config.AppConfig.MysqlUser,
@@ -299,24 +338,119 @@ func InitDB() error {
 		return err
 	}
 
-	return AutoMigrate()
+	return applySchemaPolicy()
 }
 
 func AutoMigrate() error {
-	return DB.AutoMigrate(
-		&User{},
-		&Role{},
-		&Customer{},
-		&ContractType{},
-		&Contract{},
-		&ContractExecution{},
-		&ApprovalRecord{},
-		&Document{},
-		&ContractLifecycleEvent{},
-		&Reminder{},
-		&StatusChangeRequest{},
-		&AuditLog{},
-	)
+	return DB.AutoMigrate(managedSchemaModels...)
+}
+
+func applySchemaPolicy() error {
+	environment := currentSchemaEnvironment()
+	mode, err := resolveMigrationMode(environment)
+	if err != nil {
+		return err
+	}
+
+	switch mode {
+	case "auto":
+		fmt.Printf("database schema mode=auto, environment=%s: applying AutoMigrate for local development/test use\n", environment)
+		return AutoMigrate()
+	case "force":
+		fmt.Printf("WARNING: database schema mode=force, environment=%s: AutoMigrate explicitly enabled; do not use in regulated production change windows\n", environment)
+		return AutoMigrate()
+	case "manual", "baseline-only":
+		if err := verifyManagedSchema(environment); err != nil {
+			return err
+		}
+		if !DB.Migrator().HasTable("schema_migrations") {
+			fmt.Printf("WARNING: environment=%s is running without schema_migrations baseline metadata; backfill migrations/0001_baseline.sql audit record before the next regulated release\n", environment)
+		}
+		fmt.Printf("database schema mode=%s, environment=%s: skipping AutoMigrate and expecting managed SQL migrations\n", mode, environment)
+		return nil
+	default:
+		return fmt.Errorf("unsupported migration mode %q", mode)
+	}
+}
+
+func currentSchemaEnvironment() string {
+	for _, candidate := range []string{
+		os.Getenv("APP_ENV"),
+		os.Getenv("GIN_MODE"),
+	} {
+		normalized := normalizeSchemaEnvironment(candidate)
+		if normalized != "" {
+			return normalized
+		}
+	}
+
+	return "development"
+}
+
+func normalizeSchemaEnvironment(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "":
+		return ""
+	case "prod":
+		return "production"
+	case "dev":
+		return "development"
+	case "qa":
+		return "test"
+	default:
+		return strings.ToLower(strings.TrimSpace(value))
+	}
+}
+
+func resolveMigrationMode(environment string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("DB_MIGRATION_MODE"))) {
+	case "":
+		if isProtectedSchemaEnvironment(environment) {
+			return "manual", nil
+		}
+		return "auto", nil
+	case "auto":
+		if isProtectedSchemaEnvironment(environment) {
+			return "", fmt.Errorf("DB_MIGRATION_MODE=auto is blocked in %s environment; apply SQL migrations first or use DB_MIGRATION_MODE=force only under an approved emergency procedure", environment)
+		}
+		return "auto", nil
+	case "manual", "off", "disabled", "readonly":
+		return "manual", nil
+	case "baseline", "baseline-only", "verify":
+		return "baseline-only", nil
+	case "force", "force-auto", "unsafe-auto":
+		return "force", nil
+	default:
+		return "", fmt.Errorf("unsupported DB_MIGRATION_MODE %q", os.Getenv("DB_MIGRATION_MODE"))
+	}
+}
+
+func isProtectedSchemaEnvironment(environment string) bool {
+	switch environment {
+	case "production", "staging", "preprod":
+		return true
+	default:
+		return false
+	}
+}
+
+func verifyManagedSchema(environment string) error {
+	missingTables := make([]string, 0)
+	for _, table := range managedSchemaTables {
+		if !DB.Migrator().HasTable(table.model) {
+			missingTables = append(missingTables, table.name)
+		}
+	}
+
+	if len(missingTables) > 0 {
+		return fmt.Errorf(
+			"database schema is incomplete for environment=%s, missing tables: %s; apply migrations/0001_baseline.sql and follow-on scripts before starting the service, or use DB_MIGRATION_MODE=force only for non-production bootstrap",
+			environment,
+			strings.Join(missingTables, ", "),
+		)
+	}
+
+	return nil
 }
 
 func InitAdmin() error {

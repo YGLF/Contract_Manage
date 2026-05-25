@@ -9,12 +9,173 @@ import (
 	"contract-manage/models"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type ContractService struct{}
 
 func NewContractService() *ContractService {
 	return &ContractService{}
+}
+
+var (
+	ErrControlledContractStatusChange = errors.New("合同关键状态为受控字段，请通过审批流或状态变更申请修改")
+	ErrUnsupportedStatusChangeTarget  = errors.New("目标状态不支持通过当前入口变更")
+)
+
+type contractStatusTransitionOptions struct {
+	EventType   models.LifecycleEventType
+	Description string
+}
+
+func normalizeContractStatus(status string) string {
+	return strings.TrimSpace(status)
+}
+
+func (s *ContractService) isValidContractStatus(status string) bool {
+	switch models.ContractStatus(normalizeContractStatus(status)) {
+	case models.StatusDraft,
+		models.StatusPending,
+		models.StatusApproved,
+		models.StatusActive,
+		models.StatusInProgress,
+		models.StatusPendingPay,
+		models.StatusCompleted,
+		models.StatusTerminated,
+		models.StatusArchived:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *ContractService) isApprovalManagedStatus(status string) bool {
+	switch models.ContractStatus(normalizeContractStatus(status)) {
+	case models.StatusDraft, models.StatusPending, models.StatusApproved, models.StatusActive:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *ContractService) defaultLifecycleForStatus(status models.ContractStatus) (models.LifecycleEventType, string) {
+	switch status {
+	case models.StatusPending:
+		return models.LifecycleSubmitted, "合同提交审批"
+	case models.StatusApproved:
+		return models.LifecycleApproved, "合同审批通过"
+	case models.StatusActive:
+		return models.LifecycleActivated, "合同审批通过并生效"
+	case models.StatusInProgress:
+		return models.LifecycleProgress, "合同进入执行中"
+	case models.StatusPendingPay:
+		return models.LifecyclePayment, "合同进入待付款"
+	case models.StatusCompleted:
+		return models.LifecycleCompleted, "合同已完成"
+	case models.StatusTerminated:
+		return models.LifecycleTerminated, "合同已终止"
+	case models.StatusArchived:
+		return models.LifecycleArchived, "合同已归档"
+	default:
+		return "status_changed", "合同状态变更"
+	}
+}
+
+func (s *ContractService) addLifecycleEventTx(tx *gorm.DB, contractID uint, input LifecycleEventInput, operatorID uint) (*models.ContractLifecycleEvent, error) {
+	event := models.ContractLifecycleEvent{
+		ContractID:  contractID,
+		EventType:   models.LifecycleEventType(input.EventType),
+		FromStatus:  input.FromStatus,
+		ToStatus:    input.ToStatus,
+		Amount:      input.Amount,
+		Description: input.Description,
+		OperatorID:  operatorID,
+	}
+
+	if err := tx.Create(&event).Error; err != nil {
+		return nil, err
+	}
+	return &event, nil
+}
+
+func (s *ContractService) getContractForUpdate(tx *gorm.DB, contractID uint) (*models.Contract, error) {
+	var contract models.Contract
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&contract, contractID).Error; err != nil {
+		return nil, err
+	}
+	return &contract, nil
+}
+
+func (s *ContractService) transitionContractStatusTx(tx *gorm.DB, contractID uint, newStatus models.ContractStatus, operatorID uint, options contractStatusTransitionOptions) (*models.Contract, error) {
+	if !s.isValidContractStatus(string(newStatus)) {
+		return nil, fmt.Errorf("非法合同状态: %s", newStatus)
+	}
+
+	contract, err := s.getContractForUpdate(tx, contractID)
+	if err != nil {
+		return nil, err
+	}
+
+	if contract.Status == newStatus {
+		return nil, fmt.Errorf("合同已处于%s状态", newStatus)
+	}
+
+	oldStatus := string(contract.Status)
+	if err := tx.Model(contract).Update("status", newStatus).Error; err != nil {
+		return nil, err
+	}
+	contract.Status = newStatus
+
+	eventType := options.EventType
+	description := options.Description
+	if eventType == "" || description == "" {
+		defaultEventType, defaultDescription := s.defaultLifecycleForStatus(newStatus)
+		if eventType == "" {
+			eventType = defaultEventType
+		}
+		if description == "" {
+			description = defaultDescription
+		}
+	}
+
+	if eventType != "" {
+		if _, err := s.addLifecycleEventTx(tx, contractID, LifecycleEventInput{
+			EventType:   string(eventType),
+			FromStatus:  oldStatus,
+			ToStatus:    string(newStatus),
+			Description: description,
+		}, operatorID); err != nil {
+			return nil, err
+		}
+	}
+
+	return contract, nil
+}
+
+func (s *ContractService) validateStatusChangeRequestTransition(fromStatus models.ContractStatus, toStatus models.ContractStatus) error {
+	switch fromStatus {
+	case models.StatusActive:
+		switch toStatus {
+		case models.StatusInProgress, models.StatusPendingPay, models.StatusCompleted, models.StatusTerminated, models.StatusArchived:
+			return nil
+		}
+	case models.StatusInProgress:
+		switch toStatus {
+		case models.StatusPendingPay, models.StatusCompleted, models.StatusTerminated, models.StatusArchived:
+			return nil
+		}
+	case models.StatusPendingPay:
+		switch toStatus {
+		case models.StatusCompleted, models.StatusTerminated, models.StatusArchived:
+			return nil
+		}
+	case models.StatusCompleted, models.StatusTerminated:
+		if toStatus == models.StatusArchived {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("不允许从%s发起到%s的状态变更申请", fromStatus, toStatus)
 }
 
 type JSONTime struct {
@@ -29,8 +190,9 @@ func (t *JSONTime) UnmarshalJSON(data []byte) error {
 	}
 
 	formats := []string{
-		"2006-01-02T15:04:05Z07:00",
+		time.RFC3339,
 		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05",
 		"2006-01-02",
 	}
 
@@ -142,14 +304,22 @@ func (s *ContractService) CreateContract(input ContractCreateInput, creatorID ui
 		contract.Currency = "CNY"
 	}
 
-	if err := models.DB.Create(&contract).Error; err != nil {
+	if err := models.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&contract).Error; err != nil {
+			return err
+		}
+
+		if _, err := s.addLifecycleEventTx(tx, contract.ID, LifecycleEventInput{
+			EventType:   string(models.LifecycleCreated),
+			Description: "合同创建",
+		}, creatorID); err != nil {
+			return err
+		}
+
+		return nil
+	}); err != nil {
 		return nil, err
 	}
-
-	s.AddLifecycleEvent(contract.ID, LifecycleEventInput{
-		EventType:   string(models.LifecycleCreated),
-		Description: "合同创建",
-	}, creatorID)
 
 	return &contract, nil
 }
@@ -175,6 +345,10 @@ func (s *ContractService) UpdateContract(id uint, input ContractUpdateInput) (*m
 		return nil, err
 	}
 
+	if normalizeContractStatus(string(input.Status)) != "" {
+		return nil, ErrControlledContractStatusChange
+	}
+
 	updates := map[string]interface{}{}
 	if input.Title != "" {
 		updates["title"] = input.Title
@@ -190,9 +364,6 @@ func (s *ContractService) UpdateContract(id uint, input ContractUpdateInput) (*m
 	}
 	if input.Currency != "" {
 		updates["currency"] = input.Currency
-	}
-	if input.Status != "" {
-		updates["status"] = input.Status
 	}
 	if input.SignDate != nil && !input.SignDate.Time.IsZero() {
 		updates["sign_date"] = input.SignDate.Time
@@ -338,20 +509,7 @@ type LifecycleEventInput struct {
 }
 
 func (s *ContractService) AddLifecycleEvent(contractID uint, input LifecycleEventInput, operatorID uint) (*models.ContractLifecycleEvent, error) {
-	event := models.ContractLifecycleEvent{
-		ContractID:  contractID,
-		EventType:   models.LifecycleEventType(input.EventType),
-		FromStatus:  input.FromStatus,
-		ToStatus:    input.ToStatus,
-		Amount:      input.Amount,
-		Description: input.Description,
-		OperatorID:  operatorID,
-	}
-
-	if err := models.DB.Create(&event).Error; err != nil {
-		return nil, err
-	}
-	return &event, nil
+	return s.addLifecycleEventTx(models.DB, contractID, input, operatorID)
 }
 
 func (s *ContractService) GetLifecycleEvents(contractID uint) ([]models.ContractLifecycleEvent, error) {
@@ -363,49 +521,20 @@ func (s *ContractService) GetLifecycleEvents(contractID uint) ([]models.Contract
 }
 
 func (s *ContractService) UpdateContractStatus(contractID uint, newStatus string, operatorID uint) (*models.Contract, error) {
-	var contract models.Contract
-	if err := models.DB.First(&contract, contractID).Error; err != nil {
-		return nil, err
+	normalizedStatus := normalizeContractStatus(newStatus)
+	if !s.isValidContractStatus(normalizedStatus) {
+		return nil, fmt.Errorf("非法合同状态: %s", newStatus)
 	}
 
-	oldStatus := string(contract.Status)
-	contract.Status = models.ContractStatus(newStatus)
-
-	if err := models.DB.Save(&contract).Error; err != nil {
-		return nil, err
+	if s.isApprovalManagedStatus(normalizedStatus) || s.IsStatusChangeRequireApproval(normalizedStatus) {
+		return nil, ErrControlledContractStatusChange
 	}
 
-	s.AddLifecycleEvent(contractID, LifecycleEventInput{
-		EventType:   "status_changed",
-		FromStatus:  oldStatus,
-		ToStatus:    newStatus,
-		Description: "合同状态变更",
-	}, operatorID)
-
-	return &contract, nil
+	return nil, ErrUnsupportedStatusChangeTarget
 }
 
 func (s *ContractService) ArchiveContract(contractID uint, operatorID uint) (*models.Contract, error) {
-	var contract models.Contract
-	if err := models.DB.First(&contract, contractID).Error; err != nil {
-		return nil, err
-	}
-
-	oldStatus := string(contract.Status)
-	contract.Status = models.StatusArchived
-
-	if err := models.DB.Save(&contract).Error; err != nil {
-		return nil, err
-	}
-
-	s.AddLifecycleEvent(contractID, LifecycleEventInput{
-		EventType:   string(models.LifecycleArchived),
-		FromStatus:  oldStatus,
-		ToStatus:    string(models.StatusArchived),
-		Description: "合同已归档",
-	}, operatorID)
-
-	return &contract, nil
+	return nil, ErrControlledContractStatusChange
 }
 
 var StatusChangeRequireApproval = []string{
@@ -413,6 +542,7 @@ var StatusChangeRequireApproval = []string{
 	"terminated",
 	"in_progress",
 	"pending_pay",
+	"completed",
 }
 
 func (s *ContractService) IsStatusChangeRequireApproval(newStatus string) bool {
@@ -430,30 +560,47 @@ type StatusChangeRequestInput struct {
 }
 
 func (s *ContractService) CreateStatusChangeRequest(contractID uint, input StatusChangeRequestInput, requesterID uint) (*models.StatusChangeRequest, error) {
-	var contract models.Contract
-	if err := models.DB.First(&contract, contractID).Error; err != nil {
-		return nil, err
+	toStatus := normalizeContractStatus(input.ToStatus)
+	if !s.isValidContractStatus(toStatus) {
+		return nil, fmt.Errorf("非法合同状态: %s", input.ToStatus)
+	}
+	if !s.IsStatusChangeRequireApproval(toStatus) {
+		return nil, ErrUnsupportedStatusChangeTarget
 	}
 
-	if !s.IsStatusChangeRequireApproval(input.ToStatus) {
-		return nil, nil
-	}
+	var request models.StatusChangeRequest
+	if err := models.DB.Transaction(func(tx *gorm.DB) error {
+		contract, err := s.getContractForUpdate(tx, contractID)
+		if err != nil {
+			return err
+		}
+		if contract.Status == models.ContractStatus(toStatus) {
+			return fmt.Errorf("合同已处于%s状态", toStatus)
+		}
+		if err := s.validateStatusChangeRequestTransition(contract.Status, models.ContractStatus(toStatus)); err != nil {
+			return err
+		}
 
-	var existingRequest models.StatusChangeRequest
-	if err := models.DB.Where("contract_id = ? AND status = ?", contractID, "pending").First(&existingRequest).Error; err == nil {
-		return nil, fmt.Errorf("该合同已有待审核的状态变更申请")
-	}
+		var existingRequest models.StatusChangeRequest
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("contract_id = ? AND status = ?", contractID, "pending").
+			First(&existingRequest).Error; err == nil {
+			return fmt.Errorf("该合同已有待审核的状态变更申请")
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
 
-	request := models.StatusChangeRequest{
-		ContractID:  contractID,
-		FromStatus:  string(contract.Status),
-		ToStatus:    input.ToStatus,
-		Reason:      input.Reason,
-		RequesterID: requesterID,
-		Status:      "pending",
-	}
+		request = models.StatusChangeRequest{
+			ContractID:  contractID,
+			FromStatus:  string(contract.Status),
+			ToStatus:    toStatus,
+			Reason:      input.Reason,
+			RequesterID: requesterID,
+			Status:      "pending",
+		}
 
-	if err := models.DB.Create(&request).Error; err != nil {
+		return tx.Create(&request).Error
+	}); err != nil {
 		return nil, err
 	}
 
@@ -484,76 +631,61 @@ func (s *ContractService) GetPendingStatusChangeRequests(role string) ([]models.
 
 func (s *ContractService) ApproveStatusChangeRequest(requestID uint, approverID uint, comment string) (*models.StatusChangeRequest, error) {
 	var request models.StatusChangeRequest
-	if err := models.DB.Preload("Contract").First(&request, requestID).Error; err != nil {
+	if err := models.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&request, requestID).Error; err != nil {
+			return err
+		}
+
+		if request.Status != "pending" {
+			return fmt.Errorf("该申请已被处理")
+		}
+
+		contract, err := s.getContractForUpdate(tx, request.ContractID)
+		if err != nil {
+			return err
+		}
+		if string(contract.Status) != request.FromStatus {
+			return fmt.Errorf("合同当前状态已变更，请重新发起申请")
+		}
+
+		now := time.Now()
+		request.Status = "approved"
+		request.ApproverID = &approverID
+		request.Comment = comment
+		request.ApprovedAt = &now
+
+		if err := tx.Save(&request).Error; err != nil {
+			return err
+		}
+
+		_, err = s.transitionContractStatusTx(tx, request.ContractID, models.ContractStatus(request.ToStatus), approverID, contractStatusTransitionOptions{})
+		return err
+	}); err != nil {
 		return nil, err
 	}
-
-	if request.Status != "pending" {
-		return nil, fmt.Errorf("该申请已被处理")
-	}
-
-	now := time.Now()
-	request.Status = "approved"
-	request.ApproverID = &approverID
-	request.Comment = comment
-	request.ApprovedAt = &now
-
-	if err := models.DB.Save(&request).Error; err != nil {
-		return nil, err
-	}
-
-	var contract models.Contract
-	if err := models.DB.First(&contract, request.ContractID).Error; err != nil {
-		return nil, err
-	}
-
-	oldStatus := string(contract.Status)
-	contract.Status = models.ContractStatus(request.ToStatus)
-	if err := models.DB.Save(&contract).Error; err != nil {
-		return nil, err
-	}
-
-	var eventType models.LifecycleEventType
-	var description string
-	switch request.ToStatus {
-	case "archived":
-		eventType = models.LifecycleArchived
-		description = "合同已归档"
-	case "terminated":
-		eventType = models.LifecycleTerminated
-		description = "合同已终止"
-	default:
-		eventType = "status_changed"
-		description = "合同状态变更"
-	}
-
-	s.AddLifecycleEvent(request.ContractID, LifecycleEventInput{
-		EventType:   string(eventType),
-		FromStatus:  oldStatus,
-		ToStatus:    request.ToStatus,
-		Description: description,
-	}, approverID)
 
 	return &request, nil
 }
 
 func (s *ContractService) RejectStatusChangeRequest(requestID uint, approverID uint, comment string) (*models.StatusChangeRequest, error) {
 	var request models.StatusChangeRequest
-	if err := models.DB.First(&request, requestID).Error; err != nil {
-		return nil, err
-	}
+	if err := models.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&request, requestID).Error; err != nil {
+			return err
+		}
 
-	if request.Status != "pending" {
-		return nil, fmt.Errorf("该申请已被处理")
-	}
+		if request.Status != "pending" {
+			return fmt.Errorf("该申请已被处理")
+		}
 
-	now := time.Now()
-	request.Status = "rejected"
-	request.ApproverID = &approverID
-	request.Comment = comment
-	request.ApprovedAt = &now
+		now := time.Now()
+		request.Status = "rejected"
+		request.ApproverID = &approverID
+		request.Comment = comment
+		request.ApprovedAt = &now
 
-	if err := models.DB.Save(&request).Error; err != nil {
+		return tx.Save(&request).Error
+	}); err != nil {
 		return nil, err
 	}
 

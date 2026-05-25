@@ -166,7 +166,7 @@ func TestApprovalService_UpdateApprovalRecord(t *testing.T) {
 		updated, err := service.UpdateApprovalRecord(record.ID, ApprovalRecordUpdateInput{
 			Status:  "approved",
 			Comment: "同意",
-		}, "approved", 1)
+		}, "active", 1)
 
 		if err != nil {
 			t.Errorf("UpdateApprovalRecord() error = %v", err)
@@ -187,10 +187,39 @@ func TestApprovalService_UpdateApprovalRecord(t *testing.T) {
 		_, err := service.UpdateApprovalRecord(record.ID, ApprovalRecordUpdateInput{
 			Status:  "rejected",
 			Comment: "拒绝",
-		}, "rejected", 1)
+		}, "draft", 1)
 
 		if err == nil {
 			t.Error("UpdateApprovalRecord() should reject already processed record")
+		}
+	})
+
+	t.Run("reject invalid contract target status mapping", func(t *testing.T) {
+		contract2 := models.Contract{
+			ContractNo:     "UPD002",
+			Title:          "审批更新测试-非法目标状态",
+			CustomerID:     1,
+			ContractTypeID: 1,
+			CreatorID:      1,
+			Status:         models.StatusPending,
+		}
+		models.DB.Create(&contract2)
+
+		record2 := models.ApprovalRecord{
+			ContractID:   contract2.ID,
+			ApproverID:   1,
+			Level:        1,
+			ApproverRole: "admin",
+			Status:       models.ApprovalPending,
+		}
+		models.DB.Create(&record2)
+
+		_, err := service.UpdateApprovalRecord(record2.ID, ApprovalRecordUpdateInput{
+			Status:  "approved",
+			Comment: "非法状态映射",
+		}, "approved", 1)
+		if err == nil {
+			t.Fatal("UpdateApprovalRecord() should reject invalid contract target status")
 		}
 	})
 }
@@ -395,7 +424,7 @@ func TestApprovalService_GetExpiringContracts(t *testing.T) {
 		ContractTypeID: 1,
 		CreatorID:      1,
 		Status:         models.StatusActive,
-		EndDate:        &now,
+		EndDate:        func() *time.Time { t := now.AddDate(0, 0, 40); return &t }(),
 	}
 	models.DB.Create(&futureContract)
 
@@ -431,39 +460,39 @@ func TestApprovalService_GetStatistics(t *testing.T) {
 	contracts := []models.Contract{
 		{
 			ContractNo:     "STA001",
-			Title:         "草稿合同",
-			CustomerID:    1,
+			Title:          "草稿合同",
+			CustomerID:     1,
 			ContractTypeID: 1,
-			CreatorID:     1,
-			Amount:        10000,
-			Status:        models.StatusDraft,
+			CreatorID:      1,
+			Amount:         10000,
+			Status:         models.StatusDraft,
 		},
 		{
 			ContractNo:     "STA002",
-			Title:         "生效合同",
-			CustomerID:    1,
+			Title:          "生效合同",
+			CustomerID:     1,
 			ContractTypeID: 1,
-			CreatorID:     1,
-			Amount:        20000,
-			Status:        models.StatusActive,
+			CreatorID:      1,
+			Amount:         20000,
+			Status:         models.StatusActive,
 		},
 		{
 			ContractNo:     "STA003",
-			Title:         "待审批合同",
-			CustomerID:    1,
+			Title:          "待审批合同",
+			CustomerID:     1,
 			ContractTypeID: 1,
-			CreatorID:     1,
-			Amount:        30000,
-			Status:        models.StatusPending,
+			CreatorID:      1,
+			Amount:         30000,
+			Status:         models.StatusPending,
 		},
 		{
 			ContractNo:     "STA004",
-			Title:         "已完成合同",
-			CustomerID:    1,
+			Title:          "已完成合同",
+			CustomerID:     1,
 			ContractTypeID: 1,
-			CreatorID:     1,
-			Amount:        40000,
-			Status:        models.StatusCompleted,
+			CreatorID:      1,
+			Amount:         40000,
+			Status:         models.StatusCompleted,
 		},
 	}
 
@@ -504,11 +533,11 @@ func TestApprovalService_GetPendingStatusChangesCount(t *testing.T) {
 
 	contract := models.Contract{
 		ContractNo:     "CNT001",
-		Title:         "状态变更计数测试",
-		CustomerID:    1,
+		Title:          "状态变更计数测试",
+		CustomerID:     1,
 		ContractTypeID: 1,
-		CreatorID:     1,
-		Status:        models.StatusActive,
+		CreatorID:      1,
+		Status:         models.StatusActive,
 	}
 	models.DB.Create(&contract)
 

@@ -3,7 +3,11 @@ package services
 import (
 	"contract-manage/models"
 	"errors"
+	"fmt"
 	"time"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type ApprovalService struct {
@@ -68,63 +72,125 @@ func (s *ApprovalService) CreateApprovalRecord(input ApprovalRecordCreateInput, 
 	return &record, nil
 }
 
+func (s *ApprovalService) CreateApprovalRecordAndSubmit(input ApprovalRecordCreateInput, approverID uint, approverRole string) (*models.ApprovalRecord, error) {
+	var record models.ApprovalRecord
+
+	if err := models.DB.Transaction(func(tx *gorm.DB) error {
+		record = models.ApprovalRecord{
+			ContractID:   input.ContractID,
+			ApproverID:   approverID,
+			Level:        input.Level,
+			ApproverRole: approverRole,
+			Status:       models.ApprovalPending,
+			Comment:      input.Comment,
+		}
+		if input.Status != "" {
+			record.Status = models.ApprovalStatus(input.Status)
+		}
+
+		if err := tx.Create(&record).Error; err != nil {
+			return err
+		}
+
+		contract, err := s.contractService.getContractForUpdate(tx, input.ContractID)
+		if err != nil {
+			return err
+		}
+		if contract.Status != models.StatusDraft {
+			return fmt.Errorf("仅草稿状态合同可提交审批，当前状态为%s", contract.Status)
+		}
+
+		_, err = s.contractService.transitionContractStatusTx(tx, input.ContractID, models.StatusPending, approverID, contractStatusTransitionOptions{
+			EventType:   models.LifecycleSubmitted,
+			Description: "合同提交审批",
+		})
+		return err
+	}); err != nil {
+		return nil, err
+	}
+
+	return &record, nil
+}
+
 type ApprovalRecordUpdateInput struct {
 	Status  string `json:"status" binding:"required"`
 	Comment string `json:"comment"`
 }
 
 func (s *ApprovalService) UpdateApprovalRecord(id uint, input ApprovalRecordUpdateInput, contractStatus string, operatorID uint) (*models.ApprovalRecord, error) {
-	record, err := s.GetApprovalRecordByID(id)
-	if err != nil {
-		return nil, err
-	}
+	var record models.ApprovalRecord
 
-	if record.Status != models.ApprovalPending {
-		return nil, errors.New("this approval has already been processed")
-	}
-
-	oldStatus := string(models.StatusPending)
-	var newStatus string
-
-	now := time.Now()
-	record.Status = models.ApprovalStatus(input.Status)
-	record.Comment = input.Comment
-	record.ApprovedAt = &now
-
-	if err := models.DB.Save(record).Error; err != nil {
-		return nil, err
-	}
-
-	if contractStatus != "" {
-		var contract models.Contract
-		if err := models.DB.First(&contract, record.ContractID).Error; err == nil {
-			oldStatus = string(contract.Status)
-			contract.Status = models.ContractStatus(contractStatus)
-			newStatus = contractStatus
-			models.DB.Save(&contract)
-
-			var eventType models.LifecycleEventType
-			var description string
-			if input.Status == "approved" {
-				eventType = models.LifecycleApproved
-				description = "审批通过"
-			} else if input.Status == "rejected" {
-				eventType = models.LifecycleRejected
-				description = "审批拒绝"
-			}
-
-			if eventType != "" {
-				s.contractService.AddLifecycleEvent(record.ContractID, LifecycleEventInput{
-					EventType:   string(eventType),
-					FromStatus:  oldStatus,
-					ToStatus:    newStatus,
-					Description: description,
-				}, operatorID)
-			}
+	if err := models.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&record, id).Error; err != nil {
+			return err
 		}
+
+		if record.Status != models.ApprovalPending {
+			return errors.New("this approval has already been processed")
+		}
+
+		now := time.Now()
+		record.Status = models.ApprovalStatus(input.Status)
+		record.Comment = input.Comment
+		record.ApprovedAt = &now
+
+		if err := tx.Save(&record).Error; err != nil {
+			return err
+		}
+
+		if contractStatus == "" {
+			return nil
+		}
+
+		targetStatus, err := approvalResultContractStatus(input.Status, contractStatus)
+		if err != nil {
+			return err
+		}
+
+		options := contractStatusTransitionOptions{}
+		switch input.Status {
+		case "approved":
+			options.EventType = models.LifecycleApproved
+			options.Description = "审批通过"
+		case "rejected":
+			options.EventType = models.LifecycleRejected
+			options.Description = "审批拒绝"
+		default:
+			return fmt.Errorf("非法审批结果: %s", input.Status)
+		}
+
+		contract, err := s.contractService.getContractForUpdate(tx, record.ContractID)
+		if err != nil {
+			return err
+		}
+		if contract.Status != models.StatusPending {
+			return fmt.Errorf("仅待审批状态合同可处理审批结果，当前状态为%s", contract.Status)
+		}
+
+		_, err = s.contractService.transitionContractStatusTx(tx, record.ContractID, targetStatus, operatorID, options)
+		return err
+	}); err != nil {
+		return nil, err
 	}
 
-	return record, nil
+	return &record, nil
+}
+
+func approvalResultContractStatus(approvalStatus string, contractStatus string) (models.ContractStatus, error) {
+	switch approvalStatus {
+	case "approved":
+		if contractStatus != string(models.StatusActive) {
+			return "", fmt.Errorf("审批通过仅允许推进到%s，当前目标状态为%s", models.StatusActive, contractStatus)
+		}
+		return models.StatusActive, nil
+	case "rejected":
+		if contractStatus != string(models.StatusDraft) {
+			return "", fmt.Errorf("审批拒绝仅允许回退到%s，当前目标状态为%s", models.StatusDraft, contractStatus)
+		}
+		return models.StatusDraft, nil
+	default:
+		return "", fmt.Errorf("非法审批结果: %s", approvalStatus)
+	}
 }
 
 func (s *ApprovalService) GetPendingApprovalsByRole(role string, userID uint) ([]map[string]interface{}, error) {
@@ -179,25 +245,21 @@ func (s *ApprovalService) GetPendingApprovalsByRole(role string, userID uint) ([
 }
 
 func (s *ApprovalService) SubmitForApproval(contractID uint, userID uint) error {
-	var contract models.Contract
-	if err := models.DB.First(&contract, contractID).Error; err != nil {
+	return models.DB.Transaction(func(tx *gorm.DB) error {
+		contract, err := s.contractService.getContractForUpdate(tx, contractID)
+		if err != nil {
+			return err
+		}
+		if contract.Status != models.StatusDraft {
+			return fmt.Errorf("仅草稿状态合同可提交审批，当前状态为%s", contract.Status)
+		}
+
+		_, err = s.contractService.transitionContractStatusTx(tx, contractID, models.StatusPending, userID, contractStatusTransitionOptions{
+			EventType:   models.LifecycleSubmitted,
+			Description: "合同提交审批",
+		})
 		return err
-	}
-
-	oldStatus := string(contract.Status)
-	contract.Status = models.StatusPending
-	if err := models.DB.Save(&contract).Error; err != nil {
-		return err
-	}
-
-	s.contractService.AddLifecycleEvent(contractID, LifecycleEventInput{
-		EventType:   string(models.LifecycleSubmitted),
-		FromStatus:  oldStatus,
-		ToStatus:    string(models.StatusPending),
-		Description: "合同提交审批",
-	}, userID)
-
-	return nil
+	})
 }
 
 func (s *ApprovalService) GetReminderByID(id uint) (*models.Reminder, error) {
@@ -255,28 +317,29 @@ func (s *ApprovalService) UpdateReminderSent(id uint) error {
 }
 
 func (s *ApprovalService) GetExpiringContracts(days int) ([]models.Contract, error) {
-	today := time.Now()
-	expiryDate := today.AddDate(0, 0, days)
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	expiryDate := todayStart.AddDate(0, 0, days+1)
 
 	var contracts []models.Contract
 	if err := models.DB.Where("end_date <= ? AND end_date >= ? AND status = ?",
-		expiryDate, today, models.StatusActive).Find(&contracts).Error; err != nil {
+		expiryDate, todayStart, models.StatusActive).Find(&contracts).Error; err != nil {
 		return nil, err
 	}
 	return contracts, nil
 }
 
 type Statistics struct {
-	TotalContracts     int64   `json:"total_contracts"`
-	ActiveContracts    int64   `json:"active_contracts"`
-	PendingContracts   int64   `json:"pending_contracts"`
-	CompletedContracts int64   `json:"completed_contracts"`
-	DraftContracts     int64   `json:"draft_contracts"`
-	TerminatedContracts int64  `json:"terminated_contracts"`
-	TotalAmount        float64 `json:"total_amount"`
-	ThisMonthContracts int64   `json:"this_month_contracts"`
-	ThisMonthAmount    float64 `json:"this_month_amount"`
-	ExpiringSoon       int     `json:"expiring_soon"`
+	TotalContracts      int64   `json:"total_contracts"`
+	ActiveContracts     int64   `json:"active_contracts"`
+	PendingContracts    int64   `json:"pending_contracts"`
+	CompletedContracts  int64   `json:"completed_contracts"`
+	DraftContracts      int64   `json:"draft_contracts"`
+	TerminatedContracts int64   `json:"terminated_contracts"`
+	TotalAmount         float64 `json:"total_amount"`
+	ThisMonthContracts  int64   `json:"this_month_contracts"`
+	ThisMonthAmount     float64 `json:"this_month_amount"`
+	ExpiringSoon        int     `json:"expiring_soon"`
 }
 
 func (s *ApprovalService) GetStatistics() (*Statistics, error) {

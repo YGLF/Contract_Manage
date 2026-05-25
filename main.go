@@ -5,6 +5,7 @@ import (
 	"contract-manage/handlers"
 	"contract-manage/middleware"
 	"contract-manage/models"
+	"contract-manage/services"
 	"fmt"
 	"html/template"
 	"time"
@@ -573,9 +574,11 @@ func main() {
 	r.Use(middleware.RequestSizeLimitMiddleware(10 << 20))
 
 	r.GET("/", func(c *gin.Context) {
-		c.HTML(200, "", gin.H{
-			"Version": config.AppConfig.AppVersion,
-			"Time":    time.Now().Format("2006-01-02 15:04:05"),
+		c.JSON(200, gin.H{
+			"name":    config.AppConfig.AppName,
+			"version": config.AppConfig.AppVersion,
+			"status":  "running",
+			"time":    time.Now().Format("2006-01-02 15:04:05"),
 		})
 	})
 
@@ -586,13 +589,12 @@ func main() {
 		})
 	})
 
-	// 静态文件服务 - 上传的文件
-	r.Static("/uploads", "./uploads")
-
 	// Swagger文档
 	r.Static("/docs", "./docs")
 	r.GET("/api-docs", func(c *gin.Context) {
-		c.HTML(200, "", gin.H{})
+		c.JSON(404, gin.H{
+			"error": "API debug console is disabled",
+		})
 	})
 
 	authHandler := handlers.NewAuthHandler()
@@ -607,10 +609,18 @@ func main() {
 	{
 		auth.POST("/register", authHandler.Register)
 		auth.POST("/login", authHandler.Login)
-		auth.GET("/users", middleware.AuthMiddleware(), authHandler.GetUsers)
+		auth.GET("/users",
+			middleware.AuthMiddleware(),
+			middleware.RequirePermission(services.ResourceUsers, services.ActionView),
+			authHandler.GetUsers,
+		)
 		auth.GET("/users/:user_id", middleware.AuthMiddleware(), authHandler.GetUserByID)
 		auth.PUT("/users/:user_id", middleware.AuthMiddleware(), authHandler.UpdateUser)
-		auth.DELETE("/users/:user_id", middleware.AuthMiddleware(), authHandler.DeleteUser)
+		auth.DELETE("/users/:user_id",
+			middleware.AuthMiddleware(),
+			middleware.RequirePermission(services.ResourceUsers, services.ActionDelete),
+			authHandler.DeleteUser,
+		)
 	}
 
 	api := r.Group("/api")
@@ -650,19 +660,49 @@ func main() {
 
 		api.GET("/contracts/:contract_id/approvals", approvalHandler.GetContractApprovals)
 		api.POST("/contracts/:contract_id/approvals", approvalHandler.CreateApproval)
-		api.PUT("/approvals/:approval_id", approvalHandler.UpdateApproval)
-		api.GET("/pending-approvals", approvalHandler.GetPendingApprovals)
+		api.PUT("/approvals/:approval_id",
+			middleware.RequirePermission(services.ResourceApprovals, services.ActionApprove),
+			approvalHandler.UpdateApproval,
+		)
+		api.GET("/pending-approvals",
+			middleware.RequirePermission(services.ResourceApprovals, services.ActionView),
+			approvalHandler.GetPendingApprovals,
+		)
 
 		// 工作流审批路由
-		api.POST("/workflow/create", workflowHandler.CreateWorkflow)
-		api.GET("/workflow/:contract_id", workflowHandler.GetWorkflow)
-		api.GET("/workflow/:contract_id/pending", workflowHandler.GetMyPendingApproval)
-		api.POST("/workflow/approve", workflowHandler.Approve)
-		api.POST("/workflow/reject", workflowHandler.Reject)
+		api.POST("/workflow/create",
+			middleware.RequirePermission(services.ResourceWorkflow, services.ActionCreate),
+			workflowHandler.CreateWorkflow,
+		)
+		api.GET("/workflow/:contract_id",
+			middleware.RequirePermission(services.ResourceWorkflow, services.ActionView),
+			workflowHandler.GetWorkflow,
+		)
+		api.GET("/workflow/:contract_id/pending",
+			middleware.RequirePermission(services.ResourceWorkflow, services.ActionView),
+			workflowHandler.GetMyPendingApproval,
+		)
+		api.POST("/workflow/approve",
+			middleware.RequirePermission(services.ResourceWorkflow, services.ActionApprove),
+			workflowHandler.Approve,
+		)
+		api.POST("/workflow/reject",
+			middleware.RequirePermission(services.ResourceWorkflow, services.ActionReject),
+			workflowHandler.Reject,
+		)
 
-		api.GET("/pending-status-changes", contractHandler.GetPendingStatusChangeApprovals)
-		api.POST("/status-change-requests/:request_id/approve", contractHandler.ApproveStatusChangeRequest)
-		api.POST("/status-change-requests/:request_id/reject", contractHandler.RejectStatusChangeRequest)
+		api.GET("/pending-status-changes",
+			middleware.RequirePermission(services.ResourceStatusChanges, services.ActionView),
+			contractHandler.GetPendingStatusChangeApprovals,
+		)
+		api.POST("/status-change-requests/:request_id/approve",
+			middleware.RequirePermission(services.ResourceStatusChanges, services.ActionApprove),
+			contractHandler.ApproveStatusChangeRequest,
+		)
+		api.POST("/status-change-requests/:request_id/reject",
+			middleware.RequirePermission(services.ResourceStatusChanges, services.ActionReject),
+			contractHandler.RejectStatusChangeRequest,
+		)
 
 		api.GET("/contracts/:contract_id/reminders", approvalHandler.GetContractReminders)
 		api.POST("/contracts/:contract_id/reminders", approvalHandler.CreateReminder)
@@ -673,10 +713,22 @@ func main() {
 		api.GET("/statistics", approvalHandler.GetStatistics)
 		api.GET("/notifications/count", approvalHandler.GetNotificationCounts)
 
-		api.GET("/audit-logs", auditHandler.GetAuditLogs)
-		api.DELETE("/audit-logs/:id", auditHandler.DeleteAuditLog)
-		api.POST("/audit-logs/batch-delete", auditHandler.DeleteAuditLogs)
-		api.GET("/audit-logs/export", auditHandler.ExportAuditLogs)
+		api.GET("/audit-logs",
+			middleware.RequirePermission(services.ResourceAuditLogs, services.ActionView),
+			auditHandler.GetAuditLogs,
+		)
+		api.DELETE("/audit-logs/:id",
+			middleware.RequirePermission(services.ResourceAuditLogs, services.ActionDelete),
+			auditHandler.DeleteAuditLog,
+		)
+		api.POST("/audit-logs/batch-delete",
+			middleware.RequirePermission(services.ResourceAuditLogs, services.ActionDelete),
+			auditHandler.DeleteAuditLogs,
+		)
+		api.GET("/audit-logs/export",
+			middleware.RequirePermission(services.ResourceAuditLogs, services.ActionExport),
+			auditHandler.ExportAuditLogs,
+		)
 	}
 
 	_ = approvalHandler

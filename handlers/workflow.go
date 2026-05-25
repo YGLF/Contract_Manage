@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"contract-manage/models"
+	"contract-manage/middleware"
 	"contract-manage/services"
 	"net/http"
 	"strconv"
@@ -38,8 +38,7 @@ func (h *WorkflowHandler) GetWorkflow(c *gin.Context) {
 
 func (h *WorkflowHandler) CreateWorkflow(c *gin.Context) {
 	var input struct {
-		ContractID  uint64 `json:"contract_id" binding:"required"`
-		CreatorRole string `json:"creator_role" binding:"required"`
+		ContractID uint64 `json:"contract_id" binding:"required"`
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -47,9 +46,21 @@ func (h *WorkflowHandler) CreateWorkflow(c *gin.Context) {
 		return
 	}
 
-	workflow, err := h.workflowService.CreateWorkflow(input.ContractID, input.CreatorRole)
+	userID, exists := middleware.GetCurrentUserID(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+
+	role, exists := middleware.GetCurrentUserRole(c)
+	if !exists || role == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User role not found"})
+		return
+	}
+
+	workflow, err := h.workflowService.CreateWorkflow(input.ContractID, role, userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create workflow"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -68,11 +79,15 @@ func (h *WorkflowHandler) Approve(c *gin.Context) {
 		return
 	}
 
-	userID := c.GetUint("user_id")
+	userID, exists := middleware.GetCurrentUserID(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
 
-	err := h.workflowService.Approve(input.WorkflowID, 0, input.Level, uint64(userID), input.Comment)
+	err := h.workflowService.Approve(input.WorkflowID, input.Level, uint64(userID), input.Comment)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to approve"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -91,11 +106,15 @@ func (h *WorkflowHandler) Reject(c *gin.Context) {
 		return
 	}
 
-	userID := c.GetUint("user_id")
+	userID, exists := middleware.GetCurrentUserID(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
 
 	err := h.workflowService.Reject(input.WorkflowID, input.Level, uint64(userID), input.Comment)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to reject"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -103,13 +122,13 @@ func (h *WorkflowHandler) Reject(c *gin.Context) {
 }
 
 func (h *WorkflowHandler) GetMyPendingApproval(c *gin.Context) {
-	user, exists := c.Get("user")
+	role, exists := middleware.GetCurrentUserRole(c)
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User role not found"})
 		return
 	}
 
-	approvals, err := h.workflowService.GetPendingApprovals(string(user.(*models.User).Role))
+	approvals, err := h.workflowService.GetPendingApprovals(role)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get pending approvals"})
 		return

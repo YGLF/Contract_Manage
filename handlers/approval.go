@@ -62,14 +62,10 @@ func (h *ApprovalHandler) CreateApproval(c *gin.Context) {
 	input.ContractID = uint(contractID)
 	input.ApproverRole = role
 
-	approval, err := h.approvalService.CreateApprovalRecord(input, userID, role)
+	approval, err := h.approvalService.CreateApprovalRecordAndSubmit(input, userID, role)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
-	}
-
-	if role == "user" || role == "manager" || role == "admin" {
-		h.approvalService.SubmitForApproval(uint(contractID), userID)
 	}
 
 	c.JSON(http.StatusCreated, approval)
@@ -92,11 +88,6 @@ func (h *ApprovalHandler) UpdateApproval(c *gin.Context) {
 	if record == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Approval record not found"})
 		return
-	}
-
-	role, _ := middleware.GetCurrentUserRole(c)
-	if role == "" {
-		role = "user"
 	}
 
 	contractStatus := ""

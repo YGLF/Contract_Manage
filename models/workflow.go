@@ -44,8 +44,8 @@ const (
 )
 
 var ApprovalRoles = map[string]int{
-	"sales":         0,
-	"admin":         1,
-	"director":      2,
-	"super_admin":  3,
+	string(RoleUser):       0,
+	string(RoleManager):    1,
+	string(RoleAdmin):      2,
+	string(RoleAuditAdmin): 3,
 }

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"contract-manage/middleware"
+	"contract-manage/models"
 	"contract-manage/services"
 	"net/http"
 	"regexp"
@@ -125,9 +126,8 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	if input.Role == "" {
-		input.Role = "user"
-	}
+	// Public registration must never elevate privileges from client input.
+	input.Role = models.RoleUser
 
 	user, err := h.userService.CreateUser(input)
 	if err != nil {
@@ -229,6 +229,13 @@ func (h *AuthHandler) GetUserByID(c *gin.Context) {
 		return
 	}
 
+	currentUserID, _ := middleware.GetCurrentUserID(c)
+	currentRole, _ := middleware.GetCurrentUserRole(c)
+	if currentRole != string(models.RoleAdmin) && uint(id) != currentUserID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "无权限查看该用户信息"})
+		return
+	}
+
 	user, err := h.userService.GetUserByID(uint(id))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "用户不存在"})
@@ -247,6 +254,14 @@ func (h *AuthHandler) UpdateUser(c *gin.Context) {
 
 	if id < 1 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "用户ID无效"})
+		return
+	}
+
+	currentUserID, _ := middleware.GetCurrentUserID(c)
+	currentRole, _ := middleware.GetCurrentUserRole(c)
+	isAdmin := currentRole == string(models.RoleAdmin)
+	if !isAdmin && uint(id) != currentUserID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "无权限修改该用户信息"})
 		return
 	}
 
@@ -277,15 +292,12 @@ func (h *AuthHandler) UpdateUser(c *gin.Context) {
 	}
 
 	if input.Role != "" {
-		currentUserID, _ := middleware.GetCurrentUserID(c)
-		currentRole, _ := c.Get("role")
-
-		if currentRole != "admin" {
+		if !isAdmin {
 			c.JSON(http.StatusForbidden, gin.H{"error": "无权限修改用户角色"})
 			return
 		}
 
-		if uint(id) == currentUserID && input.Role != "admin" {
+		if uint(id) == currentUserID && input.Role != models.RoleAdmin {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "不能撤销自己的管理员权限"})
 			return
 		}
@@ -309,6 +321,12 @@ func (h *AuthHandler) DeleteUser(c *gin.Context) {
 
 	if id < 1 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "用户ID无效"})
+		return
+	}
+
+	currentRole, _ := middleware.GetCurrentUserRole(c)
+	if currentRole != string(models.RoleAdmin) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "无权限删除用户"})
 		return
 	}
 
