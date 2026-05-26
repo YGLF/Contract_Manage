@@ -1,0 +1,373 @@
+version: '3.8'
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  env_file:
+    - .env
+
+x-job-defaults: &job-defaults
+  restart: "no"
+
+x-http-healthcheck: &http-healthcheck
+  healthcheck:
+    test:
+      - CMD-SHELL
+      - >-
+        wget -qO- http://127.0.0.1:$${SERVICE_PORT}/health >/dev/null 2>&1 || exit 1
+    interval: 30s
+    timeout: 5s
+    retries: 5
+    start_period: 20s
+
+x-db-env: &db-env
+  DB_ENABLED: ${DB_ENABLED}
+  DB_DRIVER: ${DB_DRIVER}
+  DB_HOST: ${DB_HOST}
+  DB_PORT: ${DB_PORT}
+  DB_USER: ${DB_USER}
+  DB_PASSWORD: ${DB_PASSWORD}
+  DB_NAME: ${DB_NAME}
+
+services:
+  gateway-service:
+    <<: [*service-defaults, *http-healthcheck]
+    image: anxin-contract/gateway-service:${APP_VERSION:-1.1}
+    build:
+      context: .
+      dockerfile: Dockerfile.microservice
+      args:
+        SERVICE_NAME: gateway-service
+    environment:
+      SERVICE_PORT: ${GATEWAY_SERVICE_PORT:-8100}
+      JWT_SECRET: ${JWT_SECRET}
+      IDENTITY_SERVICE_URL: ${IDENTITY_SERVICE_URL}
+      AUDIT_SERVICE_URL: ${AUDIT_SERVICE_URL}
+      CONTRACT_SERVICE_URL: ${CONTRACT_SERVICE_URL}
+      DOCUMENT_SERVICE_URL: ${DOCUMENT_SERVICE_URL}
+      PERFORMANCE_SERVICE_URL: ${PERFORMANCE_SERVICE_URL}
+      APPROVAL_WORKFLOW_SERVICE_URL: ${APPROVAL_WORKFLOW_SERVICE_URL}
+      RISK_SERVICE_URL: ${RISK_SERVICE_URL}
+      AMENDMENT_SERVICE_URL: ${AMENDMENT_SERVICE_URL}
+      CLOSURE_SERVICE_URL: ${CLOSURE_SERVICE_URL}
+      ARCHIVE_SERVICE_URL: ${ARCHIVE_SERVICE_URL}
+      NOTIFICATION_SERVICE_URL: ${NOTIFICATION_SERVICE_URL}
+      REPORT_SERVICE_URL: ${REPORT_SERVICE_URL}
+      PARTY_SERVICE_URL: ${PARTY_SERVICE_URL}
+      SEARCH_AI_SERVICE_URL: ${SEARCH_AI_SERVICE_URL}
+    ports:
+      - "${GATEWAY_SERVICE_PORT:-8100}:${GATEWAY_SERVICE_PORT:-8100}"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          wget -qO- http://127.0.0.1:$${SERVICE_PORT:-8100}/health >/dev/null 2>&1 || exit 1
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    depends_on:
+      - identity-service
+      - audit-service
+      - contract-service
+      - document-service
+      - performance-service
+      - approval-workflow-service
+      - risk-service
+      - amendment-service
+      - closure-service
+      - archive-service
+      - notification-service
+      - report-service
+      - party-service
+      - search-ai-service
+
+  identity-service:
+    <<: [*service-defaults, *http-healthcheck]
+    image: anxin-contract/identity-service:${APP_VERSION:-1.1}
+    build:
+      context: .
+      dockerfile: Dockerfile.microservice
+      args:
+        SERVICE_NAME: identity-service
+    environment:
+      <<: *db-env
+      SERVICE_PORT: ${IDENTITY_SERVICE_PORT:-8101}
+      JWT_SECRET: ${JWT_SECRET}
+      AUDIT_SERVICE_URL: ${AUDIT_SERVICE_URL}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          wget -qO- http://127.0.0.1:$${SERVICE_PORT:-8101}/health >/dev/null 2>&1 || exit 1
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  audit-service:
+    <<: [*service-defaults, *http-healthcheck]
+    image: anxin-contract/audit-service:${APP_VERSION:-1.1}
+    build:
+      context: .
+      dockerfile: Dockerfile.microservice
+      args:
+        SERVICE_NAME: audit-service
+    environment:
+      <<: *db-env
+      SERVICE_PORT: ${AUDIT_SERVICE_PORT:-8102}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          wget -qO- http://127.0.0.1:$${SERVICE_PORT:-8102}/health >/dev/null 2>&1 || exit 1
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  contract-service:
+    <<: [*service-defaults, *http-healthcheck]
+    image: anxin-contract/contract-service:${APP_VERSION:-1.1}
+    build:
+      context: .
+      dockerfile: Dockerfile.microservice
+      args:
+        SERVICE_NAME: contract-service
+    environment:
+      <<: *db-env
+      SERVICE_PORT: ${CONTRACT_SERVICE_PORT:-8103}
+      AUDIT_SERVICE_URL: ${AUDIT_SERVICE_URL}
+      DOCUMENT_SERVICE_URL: ${DOCUMENT_SERVICE_URL}
+      PARTY_SERVICE_URL: ${PARTY_SERVICE_URL}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          wget -qO- http://127.0.0.1:$${SERVICE_PORT:-8103}/health >/dev/null 2>&1 || exit 1
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  document-service:
+    <<: [*service-defaults, *http-healthcheck]
+    image: anxin-contract/document-service:${APP_VERSION:-1.1}
+    build:
+      context: .
+      dockerfile: Dockerfile.microservice
+      args:
+        SERVICE_NAME: document-service
+    environment:
+      <<: *db-env
+      SERVICE_PORT: ${DOCUMENT_SERVICE_PORT:-8104}
+      AUDIT_SERVICE_URL: ${AUDIT_SERVICE_URL}
+      UPLOAD_DIR: ${UPLOAD_DIR:-uploads}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          wget -qO- http://127.0.0.1:$${SERVICE_PORT:-8104}/health >/dev/null 2>&1 || exit 1
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    volumes:
+      - uploads:/app/uploads
+
+  performance-service:
+    <<: *service-defaults
+    image: anxin-contract/performance-service:${APP_VERSION:-1.1}
+    build:
+      context: .
+      dockerfile: Dockerfile.microservice
+      args:
+        SERVICE_NAME: performance-service
+    environment:
+      <<: *db-env
+      SERVICE_PORT: ${PERFORMANCE_SERVICE_PORT:-8105}
+      RISK_SERVICE_URL: ${RISK_SERVICE_URL}
+
+  approval-workflow-service:
+    <<: [*service-defaults, *http-healthcheck]
+    image: anxin-contract/approval-workflow-service:${APP_VERSION:-1.1}
+    build:
+      context: .
+      dockerfile: Dockerfile.microservice
+      args:
+        SERVICE_NAME: approval-workflow-service
+    environment:
+      <<: *db-env
+      SERVICE_PORT: ${APPROVAL_WORKFLOW_SERVICE_PORT:-8106}
+      CONTRACT_SERVICE_URL: ${CONTRACT_SERVICE_URL}
+      PERFORMANCE_SERVICE_URL: ${PERFORMANCE_SERVICE_URL}
+      ARCHIVE_SERVICE_URL: ${ARCHIVE_SERVICE_URL}
+      REPORT_SERVICE_URL: ${REPORT_SERVICE_URL}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          wget -qO- http://127.0.0.1:$${SERVICE_PORT:-8106}/health >/dev/null 2>&1 || exit 1
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  risk-service:
+    <<: *service-defaults
+    image: anxin-contract/risk-service:${APP_VERSION:-1.1}
+    build:
+      context: .
+      dockerfile: Dockerfile.microservice
+      args:
+        SERVICE_NAME: risk-service
+    environment:
+      <<: *db-env
+      SERVICE_PORT: ${RISK_SERVICE_PORT:-8107}
+      NOTIFICATION_SERVICE_URL: ${NOTIFICATION_SERVICE_URL}
+
+  amendment-service:
+    <<: *service-defaults
+    image: anxin-contract/amendment-service:${APP_VERSION:-1.1}
+    build:
+      context: .
+      dockerfile: Dockerfile.microservice
+      args:
+        SERVICE_NAME: amendment-service
+    environment:
+      <<: *db-env
+      SERVICE_PORT: ${AMENDMENT_SERVICE_PORT:-8108}
+
+  closure-service:
+    <<: *service-defaults
+    image: anxin-contract/closure-service:${APP_VERSION:-1.1}
+    build:
+      context: .
+      dockerfile: Dockerfile.microservice
+      args:
+        SERVICE_NAME: closure-service
+    environment:
+      <<: *db-env
+      SERVICE_PORT: ${CLOSURE_SERVICE_PORT:-8109}
+      AUDIT_SERVICE_URL: ${AUDIT_SERVICE_URL}
+      ARCHIVE_SERVICE_URL: ${ARCHIVE_SERVICE_URL}
+      PERFORMANCE_SERVICE_URL: ${PERFORMANCE_SERVICE_URL}
+      RISK_SERVICE_URL: ${RISK_SERVICE_URL}
+
+  archive-service:
+    <<: *service-defaults
+    image: anxin-contract/archive-service:${APP_VERSION:-1.1}
+    build:
+      context: .
+      dockerfile: Dockerfile.microservice
+      args:
+        SERVICE_NAME: archive-service
+    environment:
+      <<: *db-env
+      SERVICE_PORT: ${ARCHIVE_SERVICE_PORT:-8110}
+
+  notification-service:
+    <<: [*service-defaults, *http-healthcheck]
+    image: anxin-contract/notification-service:${APP_VERSION:-1.1}
+    build:
+      context: .
+      dockerfile: Dockerfile.microservice
+      args:
+        SERVICE_NAME: notification-service
+    environment:
+      <<: *db-env
+      SERVICE_PORT: ${NOTIFICATION_SERVICE_PORT:-8111}
+      AUDIT_SERVICE_URL: ${AUDIT_SERVICE_URL}
+      AUTO_SEND_RISK_ALERTS: ${AUTO_SEND_RISK_ALERTS:-true}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          wget -qO- http://127.0.0.1:$${SERVICE_PORT:-8111}/health >/dev/null 2>&1 || exit 1
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  report-service:
+    <<: [*service-defaults, *http-healthcheck]
+    image: anxin-contract/report-service:${APP_VERSION:-1.1}
+    build:
+      context: .
+      dockerfile: Dockerfile.microservice
+      args:
+        SERVICE_NAME: report-service
+    environment:
+      <<: *db-env
+      SERVICE_PORT: ${REPORT_SERVICE_PORT:-8112}
+      AUDIT_SERVICE_URL: ${AUDIT_SERVICE_URL}
+      CONTRACT_SERVICE_URL: ${CONTRACT_SERVICE_URL}
+      APPROVAL_SERVICE_URL: ${APPROVAL_WORKFLOW_SERVICE_URL}
+      RISK_SERVICE_URL: ${RISK_SERVICE_URL}
+      ARCHIVE_SERVICE_URL: ${ARCHIVE_SERVICE_URL}
+      CLOSURE_SERVICE_URL: ${CLOSURE_SERVICE_URL}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          wget -qO- http://127.0.0.1:$${SERVICE_PORT:-8112}/health >/dev/null 2>&1 || exit 1
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  party-service:
+    <<: *service-defaults
+    image: anxin-contract/party-service:${APP_VERSION:-1.1}
+    build:
+      context: .
+      dockerfile: Dockerfile.microservice
+      args:
+        SERVICE_NAME: party-service
+    environment:
+      <<: *db-env
+      SERVICE_PORT: ${PARTY_SERVICE_PORT:-8113}
+
+  search-ai-service:
+    <<: [*service-defaults, *http-healthcheck]
+    image: anxin-contract/search-ai-service:${APP_VERSION:-1.1}
+    build:
+      context: .
+      dockerfile: Dockerfile.microservice
+      args:
+        SERVICE_NAME: search-ai-service
+    environment:
+      SERVICE_PORT: ${SEARCH_AI_SERVICE_PORT:-8114}
+      AUDIT_SERVICE_URL: ${AUDIT_SERVICE_URL}
+      CONTRACT_SERVICE_URL: ${CONTRACT_SERVICE_URL}
+      RISK_SERVICE_URL: ${RISK_SERVICE_URL}
+      REPORT_SERVICE_URL: ${REPORT_SERVICE_URL}
+      PARTY_SERVICE_URL: ${PARTY_SERVICE_URL}
+      PERFORMANCE_SERVICE_URL: ${PERFORMANCE_SERVICE_URL}
+      ARCHIVE_SERVICE_URL: ${ARCHIVE_SERVICE_URL}
+      AI_MODEL_ENDPOINT: ${AI_MODEL_ENDPOINT}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          wget -qO- http://127.0.0.1:$${SERVICE_PORT:-8114}/health >/dev/null 2>&1 || exit 1
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  outbox-dispatcher:
+    <<: [*service-defaults, *job-defaults]
+    profiles: ["ops"]
+    image: anxin-contract/outbox-dispatcher:${APP_VERSION:-1.1}
+    build:
+      context: .
+      dockerfile: Dockerfile.microservice
+      args:
+        SERVICE_NAME: outbox-dispatcher
+    environment:
+      <<: *db-env
+      NOTIFICATION_SERVICE_URL: ${NOTIFICATION_SERVICE_URL}
+      REPORT_SERVICE_URL: ${REPORT_SERVICE_URL}
+
+volumes:
+  uploads:

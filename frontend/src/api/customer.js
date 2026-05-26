@@ -1,39 +1,57 @@
 import request from '@/utils/request'
 
 export const getCustomerList = (params) => {
+  const query = {}
+  if (params?.name) query.name = params.name
+  if (params?.type) query.status = params.type === 'supplier' ? 'inactive' : 'active'
   return request({
-    url: '/customers',
+    url: '/parties',
     method: 'get',
-    params
+    params: query
   })
 }
 
 export const getCustomerDetail = (id) => {
   return request({
-    url: `/customers/${id}`,
+    url: `/parties/${id}`,
     method: 'get'
   })
 }
 
 export const createCustomer = (data) => {
   return request({
-    url: '/customers',
+    url: '/parties',
     method: 'post',
-    data
+    data: {
+      name: data.name,
+      unified_social_code: data.code,
+      contact_name: data.contact_person,
+      contact_phone: data.contact_phone,
+      credit_rating: data.credit_rating,
+      credit_source: 'frontend_manual',
+      status: data.type === 'supplier' ? 'inactive' : 'active'
+    }
   })
 }
 
 export const updateCustomer = (id, data) => {
   return request({
-    url: `/customers/${id}`,
+    url: `/parties/${id}`,
     method: 'put',
-    data
+    data: {
+      name: data.name,
+      contact_name: data.contact_person,
+      contact_phone: data.contact_phone,
+      credit_rating: data.credit_rating,
+      credit_source: 'frontend_manual',
+      status: data.type === 'supplier' ? 'inactive' : 'active'
+    }
   })
 }
 
 export const deleteCustomer = (id) => {
   return request({
-    url: `/customers/${id}`,
+    url: `/parties/${id}`,
     method: 'delete'
   })
 }

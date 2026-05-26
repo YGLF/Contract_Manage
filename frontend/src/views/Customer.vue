@@ -24,10 +24,10 @@
             </el-button>
           </div>
 
-          <el-table :data="tableData" style="width: 100%" v-loading="loading">
-            <el-table-column prop="code" label="客户编码" width="120" />
-            <el-table-column prop="name" label="客户名称" />
-            <el-table-column prop="type" label="类型" width="100">
+<el-table :data="tableData" style="width: 100%" v-loading="loading" :cell-style="{ padding: '8px 0' }">
+  <el-table-column prop="code" label="客户编码" width="120" />
+  <el-table-column prop="name" label="客户名称" />
+  <el-table-column prop="type" label="类型" width="100">
               <template #default="{ row }">
                 <el-tag>{{ row.type === 'customer' ? '客户' : '供应商' }}</el-tag>
               </template>
@@ -35,18 +35,22 @@
             <el-table-column prop="contact_person" label="联系人" width="100" />
             <el-table-column prop="contact_phone" label="联系电话" width="130" />
             <el-table-column prop="credit_rating" label="信用等级" width="100" />
-            <el-table-column label="操作" width="180" fixed="right">
-              <template #default="{ row }">
-                <div class="action-buttons">
-                  <el-button type="warning" link @click="handleEdit(row)">
-                    <el-icon><Edit /></el-icon> 编辑
-                  </el-button>
-                  <el-button type="danger" link @click="handleDelete(row)">
-                    <el-icon><Delete /></el-icon> 删除
-                  </el-button>
-                </div>
-              </template>
-            </el-table-column>
+<el-table-column label="操作" width="100" fixed="right">
+  <template #default="{ row }">
+    <div class="action-buttons">
+      <el-tooltip content="编辑" placement="top">
+        <el-button type="warning" link @click="handleEdit(row)">
+          <el-icon><Edit /></el-icon>
+        </el-button>
+      </el-tooltip>
+      <el-tooltip content="删除" placement="top">
+        <el-button type="danger" link @click="handleDelete(row)">
+          <el-icon><Delete /></el-icon>
+        </el-button>
+      </el-tooltip>
+    </div>
+  </template>
+</el-table-column>
           </el-table>
 
           <el-pagination
@@ -69,23 +73,27 @@
             </el-button>
           </div>
 
-          <el-table :data="contractTypes" style="width: 100%" v-loading="typesLoading">
-            <el-table-column prop="code" label="类型编码" width="150" />
+<el-table :data="contractTypes" style="width: 100%" v-loading="typesLoading" :cell-style="{ padding: '8px 0' }">
+  <el-table-column prop="code" label="类型编码" width="150" />
             <el-table-column prop="name" label="类型名称" />
             <el-table-column prop="description" label="描述" />
             <el-table-column prop="created_at" label="创建时间" width="180" />
-            <el-table-column label="操作" width="180" fixed="right">
-              <template #default="{ row }">
-                <div class="action-buttons">
-                  <el-button type="warning" link @click="handleEditType(row)">
-                    <el-icon><Edit /></el-icon> 编辑
-                  </el-button>
-                  <el-button type="danger" link @click="handleDeleteType(row)">
-                    <el-icon><Delete /></el-icon> 删除
-                  </el-button>
-                </div>
-              </template>
-            </el-table-column>
+<el-table-column label="操作" width="100" fixed="right">
+  <template #default="{ row }">
+    <div class="action-buttons">
+      <el-tooltip content="编辑" placement="top">
+        <el-button type="warning" link @click="handleEditType(row)">
+          <el-icon><Edit /></el-icon>
+        </el-button>
+      </el-tooltip>
+      <el-tooltip content="删除" placement="top">
+        <el-button type="danger" link @click="handleDeleteType(row)">
+          <el-icon><Delete /></el-icon>
+        </el-button>
+      </el-tooltip>
+    </div>
+  </template>
+</el-table-column>
           </el-table>
         </el-tab-pane>
       </el-tabs>
@@ -187,6 +195,7 @@ const pagination = reactive({
 })
 
 const formData = reactive({
+  id: '',
   code: '',
   name: '',
   type: 'customer',
@@ -217,14 +226,26 @@ const typeFormRules = {
 const loadData = async () => {
   loading.value = true
   try {
-    const params = {
-      skip: (pagination.page - 1) * pagination.size,
-      limit: pagination.size,
-      ...searchForm
+    const params = {}
+    if (searchForm.name) {
+      params.name = searchForm.name
     }
-    const data = await getCustomerList(params)
-    tableData.value = data
-    pagination.total = data.length
+    if (searchForm.type) {
+      params.type = searchForm.type
+    }
+    const res = await getCustomerList(params)
+    const data = res.data || res || []
+    tableData.value = data.map(item => ({
+      id: item.id,
+      code: item.unified_social_code,
+      name: item.name,
+      type: item.status === 'inactive' ? 'supplier' : 'customer',
+      contact_person: item.contact_name,
+      contact_phone: item.contact_phone,
+      credit_rating: item.credit_rating,
+      status: item.status
+    }))
+    pagination.total = tableData.value.length
   } finally {
     loading.value = false
   }
@@ -246,7 +267,17 @@ const handleAdd = () => {
 
 const handleEdit = (row) => {
   dialogTitle.value = '编辑客户'
-  Object.assign(formData, row)
+    Object.assign(formData, {
+      id: row.id,
+      code: row.code,
+      name: row.name,
+      type: row.type,
+      contact_person: row.contact_person,
+      contact_phone: row.contact_phone,
+      contact_email: '',
+      address: '',
+      credit_rating: row.credit_rating
+    })
   dialogVisible.value = true
 }
 
@@ -289,10 +320,11 @@ const handleSubmit = async () => {
 
 const handleDialogClose = () => {
   formRef.value?.resetFields()
-  Object.assign(formData, {
-    code: '',
-    name: '',
-    type: 'customer',
+    Object.assign(formData, {
+      id: '',
+      code: '',
+      name: '',
+      type: 'customer',
     contact_person: '',
     contact_phone: '',
     contact_email: '',

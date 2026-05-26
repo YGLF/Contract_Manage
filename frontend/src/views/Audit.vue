@@ -21,26 +21,34 @@
       </template>
 
       <div class="search-form">
-        <el-form :inline="true" :model="searchForm">
-          <el-form-item label="用户名">
-            <el-input v-model="searchForm.username" placeholder="请输入用户名" clearable />
+        <el-form :inline="true" :model="searchForm" class="search-form-inline">
+          <el-form-item label="用户名" class="search-item">
+            <el-input v-model="searchForm.username" placeholder="请输入用户名" clearable style="width: 140px" />
           </el-form-item>
-          <el-form-item label="操作">
-            <el-input v-model="searchForm.action" placeholder="请输入操作" clearable />
+          <el-form-item label="操作描述" class="search-item">
+            <el-input v-model="searchForm.action" placeholder="请输入操作描述" clearable style="width: 180px" />
           </el-form-item>
-          <el-form-item label="模块">
-            <el-select v-model="searchForm.module" placeholder="请选择模块" clearable>
-              <el-option label="认证" value="auth" />
-              <el-option label="合同" value="contract" />
-              <el-option label="客户" value="customer" />
-              <el-option label="审批" value="approval" />
-              <el-option label="提醒" value="reminder" />
-              <el-option label="用户" value="user" />
-              <el-option label="统计" value="statistics" />
+          <el-form-item label="模块" class="search-item">
+            <el-select v-model="searchForm.module" placeholder="全部" clearable style="width: 120px">
+              <el-option label="全部" value="" />
+              <el-option label="认证" value="认证" />
+              <el-option label="合同" value="合同" />
+              <el-option label="客户" value="客户" />
+              <el-option label="审批" value="审批" />
+              <el-option label="提醒" value="提醒" />
+              <el-option label="用户" value="用户" />
+              <el-option label="统计" value="统计" />
               <el-option label="其他" value="other" />
             </el-select>
           </el-form-item>
-          <el-form-item label="日期">
+          <el-form-item label="操作结果" class="search-item">
+            <el-select v-model="searchForm.result" placeholder="全部" clearable style="width: 100px">
+              <el-option label="全部" value="" />
+              <el-option label="成功" :value="200" />
+              <el-option label="失败" :value="400" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="操作时间" class="search-item">
             <el-date-picker
               v-model="dateRange"
               type="daterange"
@@ -48,21 +56,27 @@
               start-placeholder="开始日期"
               end-placeholder="结束日期"
               value-format="YYYY-MM-DD"
+              style="width: 240px"
             />
           </el-form-item>
-          <el-form-item>
-            <el-button type="primary" @click="handleSearch">搜索</el-button>
-            <el-button @click="handleReset">重置</el-button>
+          <el-form-item class="search-item">
+            <el-button type="primary" @click="handleSearch">
+              <el-icon><Search /></el-icon>搜索
+            </el-button>
+            <el-button @click="handleReset">
+              <el-icon><Refresh /></el-icon>重置
+            </el-button>
           </el-form-item>
         </el-form>
       </div>
 
-      <el-table 
-        :data="tableData" 
-        style="width: 100%" 
-        v-loading="loading"
-        @selection-change="handleSelectionChange"
-      >
+<el-table
+  :data="tableData"
+  style="width: 100%"
+  v-loading="loading"
+  :cell-style="{ padding: '8px 0' }"
+  @selection-change="handleSelectionChange"
+>
         <el-table-column v-if="isAuditAdmin" type="selection" width="55" />
         <el-table-column prop="username" label="用户名" width="120" />
         <el-table-column prop="module" label="模块" width="80">
@@ -90,11 +104,15 @@
             {{ formatDateTime(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column v-if="isAuditAdmin" label="操作" width="80" fixed="right">
-          <template #default="{ row }">
-            <el-button type="danger" link @click="handleDelete(row)">删除</el-button>
-          </template>
-        </el-table-column>
+<el-table-column v-if="isAuditAdmin" label="操作" width="60" fixed="right">
+  <template #default="{ row }">
+    <el-tooltip content="删除" placement="top">
+      <el-button type="danger" link @click="handleDelete(row)">
+        <el-icon><Delete /></el-icon>
+      </el-button>
+    </el-tooltip>
+  </template>
+</el-table-column>
       </el-table>
 
       <div class="pagination">
@@ -132,7 +150,8 @@ const dateRange = ref([])
 const searchForm = reactive({
   username: '',
   action: '',
-  module: ''
+  module: '',
+  result: ''
 })
 
 const pagination = reactive({
@@ -184,13 +203,15 @@ const loadData = async () => {
   try {
     const params = {
       page: pagination.page,
-      page_size: pagination.pageSize,
-      username: searchForm.username || undefined,
-      action: searchForm.action || undefined,
-      module: searchForm.module || undefined,
-      start_date: dateRange.value?.[0] || undefined,
-      end_date: dateRange.value?.[1] || undefined
+      page_size: pagination.pageSize
     }
+    if (searchForm.username) params.username = searchForm.username
+    if (searchForm.action) params.action = searchForm.action
+    if (searchForm.module) params.module = searchForm.module
+    if (searchForm.result) params.status_code = searchForm.result
+    if (dateRange.value?.[0]) params.start_date = dateRange.value[0]
+    if (dateRange.value?.[1]) params.end_date = dateRange.value[1]
+    
     const res = await getAuditLogs(params)
     tableData.value = res.logs || []
     pagination.total = res.total || 0
@@ -210,6 +231,7 @@ const handleReset = () => {
   searchForm.username = ''
   searchForm.action = ''
   searchForm.module = ''
+  searchForm.result = ''
   dateRange.value = []
   handleSearch()
 }

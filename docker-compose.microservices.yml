@@ -1,0 +1,352 @@
+version: '3.8'
+
+x-go-service-defaults: &go-service-defaults
+  image: golang:1.21
+  restart: unless-stopped
+
+services:
+  gateway-service:
+    <<: *go-service-defaults
+    container_name: gateway_service
+    working_dir: /workspace
+    command: go run ./cmd/gateway-service
+    volumes:
+      - ./:/workspace
+    env_file:
+      - .env
+    environment:
+      SERVICE_PORT: ${GATEWAY_SERVICE_PORT:-8100}
+      JWT_SECRET: ${JWT_SECRET}
+      IDENTITY_SERVICE_URL: ${IDENTITY_SERVICE_URL}
+      AUDIT_SERVICE_URL: ${AUDIT_SERVICE_URL}
+      CONTRACT_SERVICE_URL: ${CONTRACT_SERVICE_URL}
+      DOCUMENT_SERVICE_URL: ${DOCUMENT_SERVICE_URL}
+      PERFORMANCE_SERVICE_URL: ${PERFORMANCE_SERVICE_URL}
+      APPROVAL_WORKFLOW_SERVICE_URL: ${APPROVAL_WORKFLOW_SERVICE_URL}
+      RISK_SERVICE_URL: ${RISK_SERVICE_URL}
+      AMENDMENT_SERVICE_URL: ${AMENDMENT_SERVICE_URL}
+      CLOSURE_SERVICE_URL: ${CLOSURE_SERVICE_URL}
+      ARCHIVE_SERVICE_URL: ${ARCHIVE_SERVICE_URL}
+      NOTIFICATION_SERVICE_URL: ${NOTIFICATION_SERVICE_URL}
+      REPORT_SERVICE_URL: ${REPORT_SERVICE_URL}
+      PARTY_SERVICE_URL: ${PARTY_SERVICE_URL}
+      SEARCH_AI_SERVICE_URL: ${SEARCH_AI_SERVICE_URL}
+    ports:
+      - "${GATEWAY_SERVICE_PORT:-8100}:${GATEWAY_SERVICE_PORT:-8100}"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          bash -ec 'exec 3<>/dev/tcp/127.0.0.1/$${SERVICE_PORT};
+          printf "GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n" >&3;
+          grep -q "200" <&3'
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    depends_on:
+      - identity-service
+      - audit-service
+      - contract-service
+      - document-service
+      - performance-service
+      - approval-workflow-service
+      - risk-service
+      - amendment-service
+      - closure-service
+      - archive-service
+      - notification-service
+      - report-service
+      - party-service
+      - search-ai-service
+
+  identity-service:
+    <<: *go-service-defaults
+    container_name: identity_service
+    working_dir: /workspace
+    command: go run ./cmd/identity-service
+    volumes:
+      - ./:/workspace
+    env_file:
+      - .env
+    environment:
+      SERVICE_PORT: ${IDENTITY_SERVICE_PORT:-8101}
+      JWT_SECRET: ${JWT_SECRET}
+      DB_ENABLED: ${DB_ENABLED}
+      DB_DRIVER: ${DB_DRIVER}
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+
+  audit-service:
+    <<: *go-service-defaults
+    container_name: audit_service
+    working_dir: /workspace
+    command: go run ./cmd/audit-service
+    volumes:
+      - ./:/workspace
+    env_file:
+      - .env
+    environment:
+      SERVICE_PORT: ${AUDIT_SERVICE_PORT:-8102}
+      DB_ENABLED: ${DB_ENABLED}
+      DB_DRIVER: ${DB_DRIVER}
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+
+  contract-service:
+    <<: *go-service-defaults
+    container_name: contract_service
+    working_dir: /workspace
+    command: go run ./cmd/contract-service
+    volumes:
+      - ./:/workspace
+    env_file:
+      - .env
+    environment:
+      SERVICE_PORT: ${CONTRACT_SERVICE_PORT:-8103}
+      DB_ENABLED: ${DB_ENABLED}
+      DB_DRIVER: ${DB_DRIVER}
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      AUDIT_SERVICE_URL: ${AUDIT_SERVICE_URL}
+      DOCUMENT_SERVICE_URL: ${DOCUMENT_SERVICE_URL}
+      PARTY_SERVICE_URL: ${PARTY_SERVICE_URL}
+
+  document-service:
+    <<: *go-service-defaults
+    container_name: document_service
+    working_dir: /workspace
+    command: go run ./cmd/document-service
+    volumes:
+      - ./:/workspace
+    env_file:
+      - .env
+    environment:
+      SERVICE_PORT: ${DOCUMENT_SERVICE_PORT:-8104}
+      DB_ENABLED: ${DB_ENABLED}
+      DB_DRIVER: ${DB_DRIVER}
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      AUDIT_SERVICE_URL: ${AUDIT_SERVICE_URL}
+      UPLOAD_DIR: ${UPLOAD_DIR:-uploads}
+
+  performance-service:
+    <<: *go-service-defaults
+    container_name: performance_service
+    working_dir: /workspace
+    command: go run ./cmd/performance-service
+    volumes:
+      - ./:/workspace
+    env_file:
+      - .env
+    environment:
+      SERVICE_PORT: ${PERFORMANCE_SERVICE_PORT:-8105}
+      DB_ENABLED: ${DB_ENABLED}
+      DB_DRIVER: ${DB_DRIVER}
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      RISK_SERVICE_URL: ${RISK_SERVICE_URL}
+
+  approval-workflow-service:
+    <<: *go-service-defaults
+    container_name: approval_workflow_service
+    working_dir: /workspace
+    command: go run ./cmd/approval-workflow-service
+    volumes:
+      - ./:/workspace
+    env_file:
+      - .env
+    environment:
+      SERVICE_PORT: ${APPROVAL_WORKFLOW_SERVICE_PORT:-8106}
+      DB_ENABLED: ${DB_ENABLED}
+      DB_DRIVER: ${DB_DRIVER}
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      CONTRACT_SERVICE_URL: ${CONTRACT_SERVICE_URL}
+      PERFORMANCE_SERVICE_URL: ${PERFORMANCE_SERVICE_URL}
+      ARCHIVE_SERVICE_URL: ${ARCHIVE_SERVICE_URL}
+      REPORT_SERVICE_URL: ${REPORT_SERVICE_URL}
+
+  risk-service:
+    <<: *go-service-defaults
+    container_name: risk_service
+    working_dir: /workspace
+    command: go run ./cmd/risk-service
+    volumes:
+      - ./:/workspace
+    env_file:
+      - .env
+    environment:
+      SERVICE_PORT: ${RISK_SERVICE_PORT:-8107}
+      DB_ENABLED: ${DB_ENABLED}
+      DB_DRIVER: ${DB_DRIVER}
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      NOTIFICATION_SERVICE_URL: ${NOTIFICATION_SERVICE_URL}
+
+  amendment-service:
+    <<: *go-service-defaults
+    container_name: amendment_service
+    working_dir: /workspace
+    command: go run ./cmd/amendment-service
+    volumes:
+      - ./:/workspace
+    env_file:
+      - .env
+    environment:
+      SERVICE_PORT: ${AMENDMENT_SERVICE_PORT:-8108}
+      DB_ENABLED: ${DB_ENABLED}
+      DB_DRIVER: ${DB_DRIVER}
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+
+  closure-service:
+    <<: *go-service-defaults
+    container_name: closure_service
+    working_dir: /workspace
+    command: go run ./cmd/closure-service
+    volumes:
+      - ./:/workspace
+    env_file:
+      - .env
+    environment:
+      SERVICE_PORT: ${CLOSURE_SERVICE_PORT:-8109}
+      DB_ENABLED: ${DB_ENABLED}
+      DB_DRIVER: ${DB_DRIVER}
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      AUDIT_SERVICE_URL: ${AUDIT_SERVICE_URL}
+      ARCHIVE_SERVICE_URL: ${ARCHIVE_SERVICE_URL}
+      PERFORMANCE_SERVICE_URL: ${PERFORMANCE_SERVICE_URL}
+      RISK_SERVICE_URL: ${RISK_SERVICE_URL}
+
+  archive-service:
+    <<: *go-service-defaults
+    container_name: archive_service
+    working_dir: /workspace
+    command: go run ./cmd/archive-service
+    volumes:
+      - ./:/workspace
+    env_file:
+      - .env
+    environment:
+      SERVICE_PORT: ${ARCHIVE_SERVICE_PORT:-8110}
+      DB_ENABLED: ${DB_ENABLED}
+      DB_DRIVER: ${DB_DRIVER}
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+
+  notification-service:
+    <<: *go-service-defaults
+    container_name: notification_service
+    working_dir: /workspace
+    command: go run ./cmd/notification-service
+    volumes:
+      - ./:/workspace
+    env_file:
+      - .env
+    environment:
+      SERVICE_PORT: ${NOTIFICATION_SERVICE_PORT:-8111}
+      DB_ENABLED: ${DB_ENABLED}
+      DB_DRIVER: ${DB_DRIVER}
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      AUDIT_SERVICE_URL: ${AUDIT_SERVICE_URL}
+      AUTO_SEND_RISK_ALERTS: ${AUTO_SEND_RISK_ALERTS:-true}
+
+  report-service:
+    <<: *go-service-defaults
+    container_name: report_service
+    working_dir: /workspace
+    command: go run ./cmd/report-service
+    volumes:
+      - ./:/workspace
+    env_file:
+      - .env
+    environment:
+      SERVICE_PORT: ${REPORT_SERVICE_PORT:-8112}
+      DB_ENABLED: ${DB_ENABLED}
+      DB_DRIVER: ${DB_DRIVER}
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      AUDIT_SERVICE_URL: ${AUDIT_SERVICE_URL}
+      CONTRACT_SERVICE_URL: ${CONTRACT_SERVICE_URL}
+      APPROVAL_SERVICE_URL: ${APPROVAL_WORKFLOW_SERVICE_URL}
+      RISK_SERVICE_URL: ${RISK_SERVICE_URL}
+      ARCHIVE_SERVICE_URL: ${ARCHIVE_SERVICE_URL}
+      CLOSURE_SERVICE_URL: ${CLOSURE_SERVICE_URL}
+
+  party-service:
+    <<: *go-service-defaults
+    container_name: party_service
+    working_dir: /workspace
+    command: go run ./cmd/party-service
+    volumes:
+      - ./:/workspace
+    env_file:
+      - .env
+    environment:
+      SERVICE_PORT: ${PARTY_SERVICE_PORT:-8113}
+      DB_ENABLED: ${DB_ENABLED}
+      DB_DRIVER: ${DB_DRIVER}
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+
+  search-ai-service:
+    <<: *go-service-defaults
+    container_name: search_ai_service
+    working_dir: /workspace
+    command: go run ./cmd/search-ai-service
+    volumes:
+      - ./:/workspace
+    env_file:
+      - .env
+    environment:
+      SERVICE_PORT: ${SEARCH_AI_SERVICE_PORT:-8114}
+      AUDIT_SERVICE_URL: ${AUDIT_SERVICE_URL}
+      CONTRACT_SERVICE_URL: ${CONTRACT_SERVICE_URL}
+      RISK_SERVICE_URL: ${RISK_SERVICE_URL}
+      REPORT_SERVICE_URL: ${REPORT_SERVICE_URL}
+      PARTY_SERVICE_URL: ${PARTY_SERVICE_URL}
+      PERFORMANCE_SERVICE_URL: ${PERFORMANCE_SERVICE_URL}
+      ARCHIVE_SERVICE_URL: ${ARCHIVE_SERVICE_URL}
+      AI_MODEL_ENDPOINT: ${AI_MODEL_ENDPOINT}

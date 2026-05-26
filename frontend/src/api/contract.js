@@ -1,4 +1,6 @@
 import request from '@/utils/request'
+import axios from 'axios'
+import { useUserStore } from '@/store/user'
 
 export const getContractList = (params) => {
   return request({
@@ -7,6 +9,8 @@ export const getContractList = (params) => {
     params
   })
 }
+
+export const getContracts = getContractList
 
 export const getContractDetail = (id) => {
   return request({
@@ -18,6 +22,14 @@ export const getContractDetail = (id) => {
 export const createContract = (data) => {
   return request({
     url: '/contracts',
+    method: 'post',
+    data
+  })
+}
+
+export const intakeContract = (data) => {
+  return request({
+    url: '/contracts/intake',
     method: 'post',
     data
   })
@@ -38,50 +50,6 @@ export const deleteContract = (id) => {
   })
 }
 
-export const getContractExecutions = (contractId) => {
-  return request({
-    url: `/contracts/${contractId}/executions`,
-    method: 'get'
-  })
-}
-
-export const createContractExecution = (data) => {
-  return request({
-    url: `/contracts/${data.contract_id}/executions`,
-    method: 'post',
-    data
-  })
-}
-
-export const deleteExecution = (id) => {
-  return request({
-    url: `/executions/${id}`,
-    method: 'delete'
-  })
-}
-
-export const getContractDocuments = (contractId) => {
-  return request({
-    url: `/contracts/${contractId}/documents`,
-    method: 'get'
-  })
-}
-
-export const uploadDocument = (data) => {
-  return request({
-    url: `/contracts/${data.contract_id}/documents`,
-    method: 'post',
-    data
-  })
-}
-
-export const deleteDocument = (id) => {
-  return request({
-    url: `/documents/${id}`,
-    method: 'delete'
-  })
-}
-
 export const getContractLifecycle = (contractId) => {
   return request({
     url: `/contracts/${contractId}/lifecycle`,
@@ -92,52 +60,91 @@ export const getContractLifecycle = (contractId) => {
 export const updateContractStatus = (contractId, data) => {
   return request({
     url: `/contracts/${contractId}/status`,
-    method: 'put',
-    data
-  })
-}
-
-export const archiveContract = (contractId) => {
-  return request({
-    url: `/contracts/${contractId}/archive`,
-    method: 'post'
-  })
-}
-
-export const requestStatusChange = (contractId, data) => {
-  return request({
-    url: `/contracts/${contractId}/status-change`,
     method: 'post',
     data
   })
 }
 
-export const getStatusChangeRequests = (contractId) => {
+export const getDocumentTempList = () => {
   return request({
-    url: `/contracts/${contractId}/status-change`,
+    url: '/documents/temp',
     method: 'get'
   })
 }
 
-export const getPendingStatusChangeApprovals = () => {
+export const getDocumentTempDetail = (id) => {
   return request({
-    url: '/pending-status-changes',
+    url: `/documents/temp/${id}`,
     method: 'get'
   })
 }
 
-export const approveStatusChangeRequest = (requestId, data) => {
+export const downloadTempDocument = async (id) => {
+  let token = ''
+  try {
+    token = useUserStore().token || ''
+  } catch {
+    token = ''
+  }
+  const response = await axios.get(`/api/documents/temp/${id}/download`, {
+    responseType: 'blob',
+    headers: token ? { Authorization: `Bearer ${token}` } : {}
+  })
+  return {
+    blob: response.data,
+    contentDisposition: response.headers['content-disposition'] || ''
+  }
+}
+
+export const uploadTempDocument = (file) => {
+  const formData = new FormData()
+  formData.append('file', file)
   return request({
-    url: `/status-change-requests/${requestId}/approve`,
+    url: '/documents/temp',
     method: 'post',
-    data
+    data: formData,
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    }
   })
 }
 
-export const rejectStatusChangeRequest = (requestId, data) => {
+export const commitTempDocument = (tempDocumentId) => {
   return request({
-    url: `/status-change-requests/${requestId}/reject`,
+    url: '/documents/commit',
     method: 'post',
-    data
+    data: {
+      temp_document_id: tempDocumentId
+    }
   })
+}
+
+export const getContractDocuments = async (contractId) => {
+  const contract = await getContractDetail(contractId)
+  const documentIds = Array.isArray(contract?.document_ids) ? contract.document_ids : []
+  if (documentIds.length === 0) {
+    return []
+  }
+  const docs = await Promise.all(
+    documentIds.map(async (id) => {
+      try {
+        return await getDocumentTempDetail(id)
+      } catch {
+        return {
+          id,
+          file_name: id,
+          status: 'missing'
+        }
+      }
+    })
+  )
+  return docs.map((item) => ({
+    id: item.id,
+    name: item.file_name || item.id,
+    file_type: item.file_name?.includes('.') ? item.file_name.split('.').pop() : '-',
+    file_size: item.size || 0,
+    version: item.status || '-',
+    created_at: item.created_at,
+    bound_contract_id: item.bound_contract_id || ''
+  }))
 }

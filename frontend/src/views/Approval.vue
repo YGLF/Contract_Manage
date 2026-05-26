@@ -1,116 +1,146 @@
 <template>
   <div class="approval-page">
-    <el-card>
+    <div class="approval-stats">
+      <el-row :gutter="12">
+        <el-col :span="6">
+          <el-card shadow="hover" class="stat-card">
+            <div class="stat-content">
+              <div class="stat-icon pending"><el-icon><Clock /></el-icon></div>
+              <div class="stat-info">
+                <div class="stat-value">{{ stats.pendingCount }}</div>
+                <div class="stat-label">待审批</div>
+              </div>
+            </div>
+          </el-card>
+        </el-col>
+        <el-col :span="6">
+          <el-card shadow="hover" class="stat-card">
+            <div class="stat-content">
+              <div class="stat-icon status"><el-icon><Switch /></el-icon></div>
+              <div class="stat-info">
+                <div class="stat-value">{{ stats.statusChangeCount }}</div>
+                <div class="stat-label">状态变更</div>
+              </div>
+            </div>
+          </el-card>
+        </el-col>
+        <el-col :span="6">
+          <el-card shadow="hover" class="stat-card">
+            <div class="stat-content">
+              <div class="stat-icon plan"><el-icon><Calendar /></el-icon></div>
+              <div class="stat-info">
+                <div class="stat-value">{{ stats.planAdjustmentCount }}</div>
+                <div class="stat-label">计划调整</div>
+              </div>
+            </div>
+          </el-card>
+        </el-col>
+        <el-col :span="6">
+          <el-card shadow="hover" class="stat-card">
+            <div class="stat-content">
+              <div class="stat-icon archive"><el-icon><FolderOpened /></el-icon></div>
+              <div class="stat-info">
+                <div class="stat-value">{{ stats.archiveRequestCount }}</div>
+                <div class="stat-label">借阅与销毁</div>
+              </div>
+            </div>
+          </el-card>
+        </el-col>
+      </el-row>
+    </div>
+
+    <el-card class="approval-card">
       <template #header>
         <div class="header">
-          <span>合同审批</span>
-          <el-tag type="info">当前角色: {{ userRole }}</el-tag>
+          <div class="header-left">
+            <el-icon class="header-icon"><Check /></el-icon>
+            <span class="header-title">审批中心</span>
+            <el-tag type="warning" effect="dark">{{ pendingRows.length }} 项待处理</el-tag>
+          </div>
         </div>
       </template>
-      <el-table :data="tableData" style="width: 100%" v-loading="loading">
-        <el-table-column prop="contract_no" label="合同编号" width="150" />
-        <el-table-column prop="title" label="合同标题" />
-        <el-table-column prop="amount" label="金额" width="120">
+
+      <el-table
+        :data="tableData"
+        style="width: 100%"
+        v-loading="loading"
+        class="approval-table"
+        :default-sort="{ prop: 'created_at', order: 'descending' }"
+      >
+        <el-table-column prop="display_contract_no" label="合同编号" min-width="140" />
+        <el-table-column prop="display_title" label="事项标题" min-width="220" />
+        <el-table-column prop="request_type" label="审批类型" min-width="130">
           <template #default="{ row }">
-            ¥{{ row.amount?.toFixed(2) }}
+            <el-tag :type="getRequestTypeTag(row.request_type)" effect="dark" round size="small">
+              {{ getRequestTypeText(row.request_type) }}
+            </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="status" label="当前状态" width="100">
+        <el-table-column prop="requested_by" label="申请人" min-width="110">
           <template #default="{ row }">
-            <el-tag :type="getContractStatusType(row.status)">{{ getContractStatusText(row.status) }}</el-tag>
+            <span>{{ row.requested_by || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="160">
+        <el-table-column prop="status" label="状态" min-width="100">
           <template #default="{ row }">
-            {{ formatDateTime(row.created_at) }}
+            <el-tag :type="getStatusType(row.status)" effect="dark" round size="small">
+              {{ getStatusText(row.status) }}
+            </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="240" fixed="right">
+        <el-table-column prop="created_at" label="申请时间" min-width="170">
+          <template #default="{ row }">
+            <span class="time">{{ formatDateTime(row.created_at) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="说明" min-width="220">
+          <template #default="{ row }">
+            <span class="summary">{{ buildSummary(row) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="160" fixed="right">
           <template #default="{ row }">
             <div class="action-buttons">
-              <el-button type="primary" link @click="handleView(row)">
-                <el-icon><View /></el-icon> 查看
-              </el-button>
-              <el-button v-if="row.status === 'draft'" type="warning" link @click="handleSubmit(row)">
-                <el-icon><Position /></el-icon> 提交
-              </el-button>
-              <el-button v-else-if="row.status === 'pending'" type="success" link @click="handleApprove(row)">
-                <el-icon><Check /></el-icon> {{ userRole === 'admin' ? '二级审批' : '一级审批' }}
-              </el-button>
-              <el-button v-else-if="row.status === 'active'" type="info" link disabled>
-                已生效
-              </el-button>
+              <el-tooltip content="查看详情" placement="top">
+                <el-button type="primary" link @click="handleView(row)">
+                  <el-icon><View /></el-icon>
+                </el-button>
+              </el-tooltip>
+              <template v-if="row.status === 'pending'">
+                <el-tooltip content="审批通过" placement="top">
+                  <el-button type="success" link @click="handleApprove(row)">
+                    <el-icon><Check /></el-icon>
+                  </el-button>
+                </el-tooltip>
+                <el-tooltip content="审批驳回" placement="top">
+                  <el-button type="danger" link @click="handleReject(row)">
+                    <el-icon><Close /></el-icon>
+                  </el-button>
+                </el-tooltip>
+              </template>
             </div>
           </template>
         </el-table-column>
       </el-table>
     </el-card>
 
-    <el-card style="margin-top: 20px" v-if="userRole === 'admin' || userRole === 'manager'">
-      <template #header>
-        <div class="header">
-          <span>状态变更审批</span>
-          <el-tag type="warning">{{ statusChangeData.length }} 条待审批</el-tag>
-        </div>
-      </template>
-      <el-table :data="statusChangeData" style="width: 100%" v-loading="statusChangeLoading">
-        <el-table-column prop="contract.contract_no" label="合同编号" width="150" />
-        <el-table-column prop="contract.title" label="合同标题" />
-        <el-table-column prop="from_status" label="原状态" width="100">
-          <template #default="{ row }">
-            <el-tag>{{ getStatusText(row.from_status) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="to_status" label="目标状态" width="100">
-          <template #default="{ row }">
-            <el-tag type="warning">{{ getStatusText(row.to_status) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="reason" label="申请原因" />
-        <el-table-column prop="requester.full_name" label="申请人" width="100" />
-        <el-table-column prop="created_at" label="申请时间" width="160">
-          <template #default="{ row }">
-            {{ formatDateTime(row.created_at) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
-          <template #default="{ row }">
-            <div class="action-buttons">
-              <el-button type="primary" link @click="handleViewStatusChange(row)">
-                <el-icon><View /></el-icon> 查看
-              </el-button>
-              <el-button type="success" link @click="handleApproveStatusChange(row)">
-                <el-icon><Check /></el-icon> 通过
-              </el-button>
-              <el-button type="danger" link @click="handleRejectStatusChange(row)">
-                <el-icon><Close /></el-icon> 拒绝
-              </el-button>
-            </div>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
-
-    <el-dialog v-model="dialogVisible" title="合同审批" width="600px">
-      <el-form ref="formRef" :model="formData" label-width="100px">
+    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="640px">
+      <el-form :model="formData" label-width="110px">
         <el-form-item label="合同编号">
-          <el-input v-model="currentContract.contract_no" disabled />
+          <el-input :model-value="currentRow.display_contract_no || '-'" disabled />
         </el-form-item>
-        <el-form-item label="合同标题">
-          <el-input v-model="currentContract.title" disabled />
+        <el-form-item label="事项标题">
+          <el-input :model-value="currentRow.display_title || '-'" disabled />
         </el-form-item>
-        <el-form-item label="合同金额">
-          <el-input :value="'¥' + currentContract.amount?.toFixed(2)" disabled />
-        </el-form-item>
-        <el-form-item label="审批级别">
-          <el-tag :type="userRole === 'admin' ? 'danger' : 'warning'">
-            {{ userRole === 'admin' ? '二级审批 (管理员)' : '一级审批 (经理)' }}
+        <el-form-item label="审批类型">
+          <el-tag :type="getRequestTypeTag(currentRow.request_type)">
+            {{ getRequestTypeText(currentRow.request_type) }}
           </el-tag>
         </el-form-item>
-        <el-form-item label="审批结果" prop="status">
-          <el-radio-group v-model="formData.status">
+        <el-form-item label="审批结论">
+          <el-radio-group v-model="formData.action">
             <el-radio label="approved">通过</el-radio>
-            <el-radio label="rejected">拒绝</el-radio>
+            <el-radio label="rejected">驳回</el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="审批意见">
@@ -120,6 +150,9 @@
             :rows="4"
             placeholder="请输入审批意见"
           />
+        </el-form-item>
+        <el-form-item label="业务摘要">
+          <div class="dialog-summary">{{ buildSummary(currentRow) }}</div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -133,173 +166,258 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { View, Position, Check, Close } from '@element-plus/icons-vue'
+import {
+  Calendar,
+  Check,
+  Clock,
+  Close,
+  FolderOpened,
+  Switch,
+  View
+} from '@element-plus/icons-vue'
 import { useUserStore } from '@/store/user'
-import { getPendingApprovals, createApproval, updateApproval } from '@/api/approval'
-import { getPendingStatusChangeApprovals, approveStatusChangeRequest, rejectStatusChangeRequest } from '@/api/contract'
+import {
+  approveApprovalRequest,
+  getApprovalRequests,
+  rejectApprovalRequest
+} from '@/api/approval'
+import { getContractDetail, getContracts } from '@/api/contract'
 
 const router = useRouter()
 const userStore = useUserStore()
-const userRole = userStore.userInfo?.role || 'user'
 
 const loading = ref(false)
-const statusChangeLoading = ref(false)
 const dialogVisible = ref(false)
-const formRef = ref(null)
 const tableData = ref([])
-const statusChangeData = ref([])
-const currentContract = ref({})
-const currentApprovalId = ref(null)
+const currentRow = ref({})
+const contractMap = ref({})
+
+const stats = reactive({
+  pendingCount: 0,
+  statusChangeCount: 0,
+  planAdjustmentCount: 0,
+  archiveRequestCount: 0,
+  approvedCount: 0,
+  rejectedCount: 0,
+  activeCount: 0,
+  completedCount: 0
+})
 
 const formData = reactive({
-  status: 'approved',
+  action: 'approved',
   comment: ''
 })
 
-const getStatusText = (status) => {
-  const map = {
-    draft: '草稿',
-    pending: '待审批',
-    approved: '已批准',
-    active: '已生效',
-    in_progress: '执行中',
-    pending_pay: '待付款',
-    completed: '已完成',
-    terminated: '已终止',
-    archived: '已归档'
+const dialogTitle = computed(() => {
+  return formData.action === 'rejected' ? '驳回审批' : '处理审批'
+})
+
+const pendingRows = computed(() => tableData.value.filter(item => item.status === 'pending'))
+
+const requestTypeTextMap = {
+  status_change: '状态变更',
+  plan_adjustment: '履约计划调整',
+  archive_borrow: '档案借阅',
+  archive_destroy: '档案销毁'
+}
+
+const statusTextMap = {
+  pending: '待审批',
+  approved: '已通过',
+  rejected: '已驳回'
+}
+
+const getRequestTypeText = (type) => requestTypeTextMap[type] || type || '-'
+
+const getRequestTypeTag = (type) => {
+  const tagMap = {
+    status_change: 'warning',
+    plan_adjustment: 'primary',
+    archive_borrow: 'success',
+    archive_destroy: 'danger'
   }
-  return map[status] || status
+  return tagMap[type] || 'info'
+}
+
+const getStatusText = (status) => statusTextMap[status] || status || '-'
+
+const getStatusType = (status) => {
+  const tagMap = {
+    pending: 'warning',
+    approved: 'success',
+    rejected: 'danger'
+  }
+  return tagMap[status] || 'info'
 }
 
 const formatDateTime = (dateStr) => {
   if (!dateStr) return '-'
   const date = new Date(dateStr)
-  if (isNaN(date.getTime())) return dateStr
+  if (Number.isNaN(date.getTime())) return dateStr
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
-  const hours = date.getHours()
+  const hours = String(date.getHours()).padStart(2, '0')
   const minutes = String(date.getMinutes()).padStart(2, '0')
-  const ampm = hours < 12 ? '上午' : '下午'
-  const hour12 = hours % 12 || 12
-  return `${year}-${month}-${day} ${ampm}${hour12}:${minutes}`
+  return `${year}-${month}-${day} ${hours}:${minutes}`
 }
 
-const getContractStatusType = (status) => {
-  const typeMap = {
-    draft: 'info',
-    pending: 'warning',
-    active: 'success',
-    approved: 'success',
-    rejected: 'danger'
+const buildSummary = (row) => {
+  const payload = row.payload || {}
+  if (row.request_type === 'status_change') {
+    return `目标状态：${payload.status || '-'}`
   }
-  return typeMap[status] || ''
+  if (row.request_type === 'plan_adjustment') {
+    const count = Array.isArray(payload.nodes) ? payload.nodes.length : 0
+    return `计划节点数：${count}`
+  }
+  if (row.request_type === 'archive_borrow') {
+    return `档案借阅申请，档案ID：${row.resource_id || '-'}`
+  }
+  if (row.request_type === 'archive_destroy') {
+    return `档案销毁申请，档案ID：${row.resource_id || '-'}`
+  }
+  return '待处理审批事项'
 }
 
-const getContractStatusText = (status) => {
-  const textMap = {
-    draft: '草稿',
-    pending: '待审批',
-    active: '进行中',
-    approved: '已批准',
-    rejected: '已拒绝'
+const normalizeApprovalRows = (rows) => {
+  return rows.map(row => {
+    const contract = contractMap.value[row.contract_id] || {}
+    return {
+      ...row,
+      display_contract_no: contract.contract_no || row.contract_id || row.resource_id || '-',
+      display_title: contract.title || getRequestTypeText(row.request_type),
+      payload: row.payload || {}
+    }
+  })
+}
+
+const loadContracts = async () => {
+  try {
+    const contracts = await getContracts({})
+    if (!Array.isArray(contracts)) {
+      contractMap.value = {}
+      return
+    }
+    const nextMap = {}
+    contracts.forEach(item => {
+      nextMap[item.id] = item
+    })
+    contractMap.value = nextMap
+    stats.activeCount = contracts.filter(item => item.status === 'active').length
+    stats.completedCount = contracts.filter(item => item.status === 'completed').length
+    stats.approvedCount = contracts.filter(item => item.status === 'approved').length
+    stats.rejectedCount = contracts.filter(item => item.status === 'terminated').length
+  } catch (error) {
+    console.error('Failed to load contracts:', error)
+    contractMap.value = {}
   }
-  return textMap[status] || status
+}
+
+const calculateStats = (rows) => {
+  const pending = rows.filter(item => item.status === 'pending')
+  stats.pendingCount = pending.length
+  stats.statusChangeCount = pending.filter(item => item.request_type === 'status_change').length
+  stats.planAdjustmentCount = pending.filter(item => item.request_type === 'plan_adjustment').length
+  stats.archiveRequestCount = pending.filter(item => ['archive_borrow', 'archive_destroy'].includes(item.request_type)).length
 }
 
 const loadData = async () => {
   loading.value = true
   try {
-    const data = await getPendingApprovals()
-    tableData.value = data
+    await loadContracts()
+    const rows = await getApprovalRequests()
+    const normalizedRows = normalizeApprovalRows(Array.isArray(rows) ? rows : [])
+    tableData.value = normalizedRows
+    calculateStats(normalizedRows)
+  } catch (error) {
+    console.error('Failed to load approval requests:', error)
+    tableData.value = []
+    calculateStats([])
   } finally {
     loading.value = false
   }
-  
-  if (userRole === 'admin' || userRole === 'manager') {
-    statusChangeLoading.value = true
-    try {
-      const data = await getPendingStatusChangeApprovals()
-      statusChangeData.value = data
-    } finally {
-      statusChangeLoading.value = false
-    }
+}
+
+const handleView = async (row) => {
+  if (!row.contract_id) {
+    ElMessage.info('该审批事项没有关联合同详情页')
+    return
   }
-}
-
-const handleViewStatusChange = (row) => {
-  router.push(`/contracts/${row.contract_id}`)
-}
-
-const handleApproveStatusChange = async (row) => {
   try {
-    await ElMessageBox.confirm(`确定通过将合同 "${row.contract.title}" 状态变更为 "${getStatusText(row.to_status)}" 吗？`, '审批确认', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'success'
-    })
-    await approveStatusChangeRequest(row.id, { comment: '同意' })
-    ElMessage.success('审批通过')
-    loadData()
-  } catch (error) {
-    if (error !== 'cancel') {
-      ElMessage.error(error.response?.data?.error || '操作失败')
+    if (!contractMap.value[row.contract_id]) {
+      const detail = await getContractDetail(row.contract_id)
+      contractMap.value = {
+        ...contractMap.value,
+        [row.contract_id]: detail
+      }
     }
+    router.push(`/contracts/${row.contract_id}`)
+  } catch (error) {
+    ElMessage.error(error.response?.data?.error || '未找到关联合同')
   }
 }
 
-const handleRejectStatusChange = async (row) => {
-  try {
-    await ElMessageBox.confirm(`确定拒绝将合同 "${row.contract.title}" 状态变更申请吗？`, '审批确认', {
-      confirmButtonText: '确定拒绝',
-      cancelButtonText: '取消',
-      type: 'warning'
-    })
-    await rejectStatusChangeRequest(row.id, { comment: '拒绝' })
-    ElMessage.success('已拒绝')
-    loadData()
-  } catch (error) {
-    if (error !== 'cancel') {
-      ElMessage.error(error.response?.data?.error || '操作失败')
-    }
-  }
-}
-
-const handleView = (row) => {
-  router.push(`/contracts/${row.id}`)
-}
-
-const handleSubmit = async (row) => {
-  const level = userRole === 'admin' ? 2 : 1
-  await createApproval({
-    contract_id: row.id,
-    level: level,
-    status: 'pending',
-    comment: '提交审批'
-  })
-  ElMessage.success('已提交审批')
-  loadData()
-}
-
-const handleApprove = async (row) => {
-  currentContract.value = row
-  currentApprovalId.value = row.approval_id
-  formData.status = 'approved'
+const openDialog = (row, action) => {
+  currentRow.value = row
+  formData.action = action
   formData.comment = ''
   dialogVisible.value = true
 }
 
+const handleApprove = (row) => {
+  openDialog(row, 'approved')
+}
+
+const handleReject = (row) => {
+  openDialog(row, 'rejected')
+}
+
+const buildApprovePayload = () => ({
+  approved_by: userStore.userInfo?.username || userStore.userInfo?.id || 'system',
+  comment: formData.comment
+})
+
 const handleSubmitApproval = async () => {
-  await updateApproval(currentApprovalId.value, {
-    status: formData.status,
-    comment: formData.comment
-  })
-  ElMessage.success(formData.status === 'approved' ? '审批通过' : '审批拒绝')
-  dialogVisible.value = false
-  loadData()
+  if (!currentRow.value?.id) {
+    ElMessage.error('未找到审批记录')
+    return
+  }
+
+  if (formData.action === 'rejected' && !formData.comment.trim()) {
+    ElMessage.error('请填写驳回原因')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确认${formData.action === 'approved' ? '通过' : '驳回'}该审批事项吗？`,
+      '审批确认',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: formData.action === 'approved' ? 'success' : 'warning'
+      }
+    )
+
+    if (formData.action === 'approved') {
+      await approveApprovalRequest(currentRow.value.id, buildApprovePayload())
+      ElMessage.success('审批已通过')
+    } else {
+      await rejectApprovalRequest(currentRow.value.id, buildApprovePayload())
+      ElMessage.success('审批已驳回')
+    }
+
+    dialogVisible.value = false
+    await loadData()
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error(error.response?.data?.error || '审批处理失败')
+    }
+  }
 }
 
 onMounted(() => {
@@ -309,26 +427,117 @@ onMounted(() => {
 
 <style scoped>
 .approval-page {
-  padding: 20px;
+  padding: 16px;
+}
+
+.approval-stats {
+  margin-bottom: 16px;
+}
+
+.stat-card {
+  border-radius: 8px;
+}
+
+.stat-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.stat-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+}
+
+.stat-icon.pending {
+  background: #fdf6ec;
+  color: #e6a23c;
+}
+
+.stat-icon.status {
+  background: #fef0f0;
+  color: #f56c6c;
+}
+
+.stat-icon.plan {
+  background: #ecf5ff;
+  color: #409eff;
+}
+
+.stat-icon.archive {
+  background: #f0f9eb;
+  color: #67c23a;
+}
+
+.stat-info {
+  flex: 1;
+}
+
+.stat-value {
+  font-size: 20px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.stat-label {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #909399;
+}
+
+.approval-card {
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
 }
 
 .header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  width: 100%;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-icon {
+  color: #409eff;
+  font-size: 18px;
+}
+
+.header-title {
+  color: #303133;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.approval-table {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.time,
+.summary {
+  color: #606266;
 }
 
 .action-buttons {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
 }
 
-.action-buttons .el-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+.dialog-summary {
+  color: #606266;
+  line-height: 1.6;
 }
 
 .dialog-footer {

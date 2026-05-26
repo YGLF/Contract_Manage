@@ -4,61 +4,63 @@
       <template #header>
         <div class="card-header">
           <el-button text @click="$router.back()">
-            <el-icon><ArrowLeft /></el-icon> 返回
+            <el-icon><ArrowLeft /></el-icon>
+            返回
           </el-button>
           <span class="title">合同详情</span>
-          <el-button type="primary" @click="handleEdit">编辑合同</el-button>
+          <div class="header-actions">
+            <el-button @click="handlePerformance">履约计划</el-button>
+            <el-button type="primary" @click="handleEdit">编辑合同</el-button>
+          </div>
         </div>
       </template>
 
       <el-tabs v-model="activeTab" type="border-card" @tab-change="tabChange">
         <el-tab-pane label="基本信息" name="info">
           <el-descriptions :column="2" border>
-            <el-descriptions-item label="合同编号">{{ contract.contract_no }}</el-descriptions-item>
-            <el-descriptions-item label="合同标题">{{ contract.title }}</el-descriptions-item>
-            <el-descriptions-item label="客户名称">{{ contract.customer?.name }}</el-descriptions-item>
-            <el-descriptions-item label="合同类型">{{ contract.contract_type?.name }}</el-descriptions-item>
-            <el-descriptions-item label="金额">
-              <span class="amount">¥{{ contract.amount?.toLocaleString() }}</span>
-            </el-descriptions-item>
-            <el-descriptions-item label="状态">
+            <el-descriptions-item label="合同编号">{{ contract.contract_no || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="合同标题">{{ contract.title || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="相对方">{{ contract.counterparty_name || contract.counterparty_id || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="合同状态">
               <el-tag :type="getStatusType(contract.status)">{{ getStatusText(contract.status) }}</el-tag>
               <div class="status-actions">
-                <el-button type="primary" link size="small" @click="showStatusDialog = true">
-                  <el-icon><RefreshRight /></el-icon> 变更
+                <el-button type="primary" link size="small" @click="openStatusDialog">
+                  <el-icon><RefreshRight /></el-icon>
+                  状态变更
                 </el-button>
                 <el-button v-if="contract.status !== 'archived'" type="warning" link size="small" @click="handleArchive">
-                  <el-icon><FolderOpened /></el-icon> 归档
+                  <el-icon><FolderOpened /></el-icon>
+                  申请归档
                 </el-button>
               </div>
             </el-descriptions-item>
-            <el-descriptions-item label="签约日期">{{ formatDate(contract.sign_date) }}</el-descriptions-item>
-            <el-descriptions-item label="开始日期">{{ formatDate(contract.start_date) }}</el-descriptions-item>
-            <el-descriptions-item label="到期日期">{{ formatDate(contract.end_date) }}</el-descriptions-item>
-            <el-descriptions-item label="付款条件" :span="2">{{ contract.payment_terms || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="合同内容" :span="2">{{ contract.content || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="创建人">{{ contract.creator?.full_name || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="附件数量">{{ Array.isArray(contract.document_ids) ? contract.document_ids.length : 0 }}</el-descriptions-item>
+            <el-descriptions-item label="创建人">{{ contract.created_by || 'system' }}</el-descriptions-item>
             <el-descriptions-item label="创建时间">{{ formatDateTime(contract.created_at) }}</el-descriptions-item>
+            <el-descriptions-item label="最新补充协议" :span="2">
+              {{ contract.latest_amendment_title || contract.latest_amendment_id || '-' }}
+            </el-descriptions-item>
           </el-descriptions>
         </el-tab-pane>
 
         <el-tab-pane label="生命周期" name="lifecycle">
           <div class="tab-header">
-            <span>合同生命周期跟踪</span>
+            <span>合同生命周期</span>
           </div>
           <el-timeline>
             <el-timeline-item
-              v-for="(event, index) in lifecycleEvents"
-              :key="index"
-              :timestamp="formatDateTime(event.created_at)"
+              v-for="event in lifecycleEvents"
+              :key="event.id || `${event.event_type}-${event.occurred_at || event.created_at}`"
+              :timestamp="formatDateTime(event.occurred_at || event.created_at)"
               :type="getLifecycleItemType(event.event_type)"
-              :hollow="event.event_type === 'progress'"
             >
               <div class="lifecycle-content">
                 <div class="lifecycle-title">{{ getLifecycleTitle(event.event_type) }}</div>
                 <div class="lifecycle-desc">
-                  {{ event.from_status ? `${getStatusText(event.from_status)} → ${getStatusText(event.toStatus)}` : '' }}
-                  {{ event.description || '' }}
+                  <span v-if="event.from_status || event.to_status">
+                    {{ getStatusText(event.from_status) }} -> {{ getStatusText(event.to_status) }}
+                  </span>
+                  <span v-if="event.description">{{ event.description }}</span>
                 </div>
               </div>
             </el-timeline-item>
@@ -66,88 +68,46 @@
           <el-empty v-if="lifecycleEvents.length === 0" description="暂无生命周期记录" />
         </el-tab-pane>
 
-        <el-tab-pane label="执行跟踪" name="executions">
-          <div class="tab-header">
-            <span>执行进度管理</span>
-            <el-button type="primary" size="small" @click="showExecutionDialog = true">
-              <el-icon><Plus /></el-icon> 添加执行记录
-            </el-button>
-          </div>
-          <el-table :data="executions" v-loading="executionsLoading">
-            <el-table-column prop="stage" label="阶段" />
-            <el-table-column prop="stage_date" label="阶段日期" width="120">
-              <template #default="{ row }">
-                {{ formatDate(row.stage_date) }}
-              </template>
-            </el-table-column>
-            <el-table-column prop="progress" label="进度" width="150">
-              <template #default="{ row }">
-                <el-progress :percentage="row.progress" :color="getProgressColor(row.progress)" />
-              </template>
-            </el-table-column>
-            <el-table-column prop="payment_amount" label="付款金额" width="120">
-              <template #default="{ row }">
-                ¥{{ row.payment_amount?.toLocaleString() }}
-              </template>
-            </el-table-column>
-            <el-table-column prop="payment_date" label="付款日期" width="120">
-              <template #default="{ row }">
-                {{ formatDate(row.payment_date) }}
-              </template>
-            </el-table-column>
-            <el-table-column prop="description" label="说明" />
-            <el-table-column label="操作" width="120" fixed="right">
-              <template #default="{ row }">
-                <el-button type="danger" link @click="handleDeleteExecution(row)">
-                  <el-icon><Delete /></el-icon> 删除
-                </el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-        </el-tab-pane>
-
         <el-tab-pane label="文档管理" name="documents">
           <div class="tab-header">
-            <span>合同文档</span>
-            <el-upload
-              :action="uploadUrl"
-              :headers="uploadHeaders"
-              :data="uploadData"
-              :show-file-list="false"
-              :accept="'.doc,.docx,.pdf,.jpg,.jpeg,.png,.gif,.bmp,.webp,.txt,.html,.htm,.xls,.xlsx'"
-              :before-upload="handleBeforeUpload"
-              :on-success="handleUploadSuccess"
-              :on-error="handleUploadError"
-            >
-              <el-button type="primary" size="small">
-                <el-icon><Upload /></el-icon> 上传文档
-              </el-button>
-              <template #tip>
-                <div class="el-upload__tip" style="margin-top: 8px">支持 .doc, .docx, .pdf, 图片, 文本, Excel 格式</div>
-              </template>
-            </el-upload>
+            <span>合同附件</span>
+            <div class="document-actions">
+              <el-upload
+                :auto-upload="false"
+                :show-file-list="false"
+                :before-upload="handleSelectDocument"
+                accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg"
+              >
+                <el-button type="primary" :loading="uploadingDocument">
+                  <el-icon><UploadFilled /></el-icon>
+                  上传附件
+                </el-button>
+              </el-upload>
+              <span class="hint-text">上传后自动提交并绑定到当前合同</span>
+            </div>
           </div>
-          <el-table :data="documents" v-loading="documentsLoading">
-            <el-table-column prop="name" label="文档名称" />
-            <el-table-column prop="file_type" label="类型" width="100" />
-            <el-table-column prop="file_size" label="大小" width="100">
+          <el-table :data="documents" v-loading="documentsLoading" :cell-style="{ padding: '8px 0' }">
+            <el-table-column prop="name" label="文件名称" min-width="220" />
+            <el-table-column prop="file_type" label="类型" width="120" />
+            <el-table-column prop="file_size" label="大小" width="120">
               <template #default="{ row }">
                 {{ formatFileSize(row.file_size) }}
               </template>
             </el-table-column>
-            <el-table-column prop="version" label="版本" width="80" />
-            <el-table-column prop="created_at" label="上传时间" width="180" />
-            <el-table-column label="操作" width="220" fixed="right">
+            <el-table-column prop="version" label="状态" width="120" />
+            <el-table-column prop="created_at" label="上传时间" width="180">
+              <template #default="{ row }">
+                {{ formatDateTime(row.created_at) }}
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="140" fixed="right">
               <template #default="{ row }">
                 <div class="action-buttons">
-                  <el-button type="primary" link @click="handlePreview(row)">
-                    <el-icon><View /></el-icon> 预览
-                  </el-button>
                   <el-button type="success" link @click="handleDownload(row)">
-                    <el-icon><Download /></el-icon> 下载
+                    <el-icon><Download /></el-icon>
                   </el-button>
-                  <el-button type="danger" link @click="handleDeleteDocument(row)">
-                    <el-icon><Delete /></el-icon> 删除
+                  <el-button type="danger" link :disabled="removingDocumentId === row.id" @click="handleRemoveDocument(row)">
+                    <el-icon><Delete /></el-icon>
                   </el-button>
                 </div>
               </template>
@@ -158,146 +118,83 @@
         <el-tab-pane label="审批记录" name="approvals">
           <div class="tab-header">
             <span>审批历史</span>
-            <el-button type="primary" size="small" @click="showApprovalDialog = true" v-if="contract.status === 'draft' || contract.status === 'pending'">
-              <el-icon><Plus /></el-icon> 提交审批
+            <el-button v-if="canCreateApproval" type="primary" size="small" @click="showApprovalDialog = true">
+              <el-icon><Plus /></el-icon>
+              发起审批
             </el-button>
           </div>
-          <el-table :data="approvals" v-loading="approvalsLoading">
+          <el-table :data="approvals" v-loading="approvalsLoading" :cell-style="{ padding: '8px 0' }">
+            <el-table-column label="审批类型" width="140">
+              <template #default="{ row }">
+                <el-tag :type="getApprovalRequestTypeTag(row.request_type)">{{ getApprovalRequestTypeText(row.request_type) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="requested_by" label="申请人" width="120" />
             <el-table-column prop="approver.full_name" label="审批人" width="120" />
             <el-table-column prop="status" label="状态" width="100">
               <template #default="{ row }">
                 <el-tag :type="getApprovalStatusType(row.status)">{{ getApprovalStatusText(row.status) }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="comment" label="审批意见" />
-            <el-table-column prop="approved_at" label="审批时间" width="180" />
-            <el-table-column prop="created_at" label="提交时间" width="180" />
+            <el-table-column prop="comment" label="说明" min-width="220" />
+            <el-table-column prop="approved_at" label="审批时间" width="180">
+              <template #default="{ row }">
+                {{ formatDateTime(row.approved_at) }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="created_at" label="提交时间" width="180">
+              <template #default="{ row }">
+                {{ formatDateTime(row.created_at) }}
+              </template>
+            </el-table-column>
           </el-table>
         </el-tab-pane>
       </el-tabs>
     </el-card>
 
-    <el-dialog v-model="showExecutionDialog" title="添加执行记录" width="500px">
-      <el-form ref="executionFormRef" :model="executionForm" :rules="executionRules" label-width="100px">
-        <el-form-item label="阶段名称" prop="stage">
-          <el-input v-model="executionForm.stage" placeholder="请输入阶段名称" />
-        </el-form-item>
-        <el-form-item label="阶段日期" prop="stage_date">
-          <el-date-picker v-model="executionForm.stage_date" type="date" placeholder="选择日期" value-format="YYYY-MM-DD" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="进度%" prop="progress">
-          <el-slider v-model="executionForm.progress" :marks="{0: '0%', 50: '50%', 100: '100%'}" />
-          <div style="font-size: 12px; color: #999; margin-top: 4px">根据付款金额自动计算（合同总金额：¥{{ contractAmount.toLocaleString() }}）</div>
-        </el-form-item>
-        <el-form-item label="付款金额">
-          <el-input-number v-model="executionForm.payment_amount" :precision="2" :min="0" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="付款日期">
-          <el-date-picker v-model="executionForm.payment_date" type="date" placeholder="选择日期" value-format="YYYY-MM-DD" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="说明">
-          <el-input v-model="executionForm.description" type="textarea" :rows="3" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <div class="dialog-footer">
-          <el-button @click="showExecutionDialog = false">取消</el-button>
-          <el-button type="primary" @click="handleSubmitExecution">确定</el-button>
-        </div>
-      </template>
-    </el-dialog>
-
-    <el-dialog v-model="showApprovalDialog" title="提交审批" width="500px">
+    <el-dialog v-model="showApprovalDialog" title="发起审批" width="520px">
       <el-form ref="approvalFormRef" :model="approvalForm" :rules="approvalRules" label-width="100px">
-        <el-form-item label="审批意见" prop="comment">
-          <el-input v-model="approvalForm.comment" type="textarea" :rows="4" placeholder="请输入审批意见" />
+        <el-form-item label="审批类型" prop="request_type">
+          <el-select v-model="approvalForm.request_type" style="width: 100%">
+            <el-option label="状态变更" value="status_change" />
+            <el-option label="履约计划调整" value="plan_adjustment" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="approvalForm.request_type === 'status_change'" label="目标状态" prop="to_status">
+          <el-select v-model="approvalForm.to_status" style="width: 100%" placeholder="请选择目标状态">
+            <el-option v-for="opt in getAvailableStatusOptions()" :key="opt.value" :label="opt.label" :value="opt.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="审批说明" prop="comment">
+          <el-input v-model="approvalForm.comment" type="textarea" :rows="4" placeholder="请输入审批说明" />
         </el-form-item>
       </el-form>
       <template #footer>
         <div class="dialog-footer">
           <el-button @click="showApprovalDialog = false">取消</el-button>
-          <el-button type="primary" @click="handleSubmitApproval">提交审批</el-button>
+          <el-button type="primary" @click="handleSubmitApproval">发起审批</el-button>
         </div>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showStatusDialog" title="变更合同状态" width="500px">
+    <el-dialog v-model="showStatusDialog" title="发起状态变更审批" width="500px">
       <el-form label-width="100px">
         <el-form-item label="当前状态">
           <el-tag :type="getStatusType(contract.status)">{{ getStatusText(contract.status) }}</el-tag>
         </el-form-item>
-        <el-form-item label="变更为">
-          <el-select v-model="newStatus" placeholder="请选择新状态" style="width: 100%">
-            <el-option v-for="opt in statusOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+        <el-form-item label="目标状态">
+          <el-select v-model="newStatus" style="width: 100%" placeholder="请选择目标状态">
+            <el-option v-for="opt in getAvailableStatusOptions()" :key="opt.value" :label="opt.label" :value="opt.value" />
           </el-select>
         </el-form-item>
-        <el-form-item label="说明">
-          <el-input v-model="statusDescription" type="textarea" :rows="3" placeholder="请输入变更说明" />
+        <el-form-item label="变更说明">
+          <el-input v-model="statusDescription" type="textarea" :rows="3" placeholder="请输入状态变更原因" />
         </el-form-item>
       </el-form>
       <template #footer>
         <div class="dialog-footer">
           <el-button @click="showStatusDialog = false">取消</el-button>
-          <el-button type="primary" @click="handleUpdateStatus">确定</el-button>
-        </div>
-      </template>
-    </el-dialog>
-    
-    <!-- 文档预览对话框 -->
-    <el-dialog v-model="showPreviewDialog" :title="previewFileName" width="90%" top="5vh" destroy-on-close>
-      <div class="preview-container">
-        <div v-if="previewLoading" class="preview-loading">
-          <el-icon class="is-loading"><Loading /></el-icon>
-          <span>正在加载预览...</span>
-        </div>
-        <div v-else-if="previewError" class="preview-error">
-          <el-icon><Warning /></el-icon>
-          <span>{{ previewError }}</span>
-          <el-button type="primary" @click="downloadPreviewFile">下载文件</el-button>
-        </div>
-        
-        <!-- Word 文档或文本文件内容预览 - 表格形式 -->
-        <div v-else-if="previewData && previewData.content" class="content-preview">
-          <!-- 合同关键信息表格 -->
-          <el-table 
-            v-if="previewData.fields && previewData.fields.length > 0"
-            :data="previewData.fields" 
-            border 
-            style="width: 100%; margin-bottom: 20px;"
-            :header-cell-style="{background: '#f5f7fa', color: '#409eff', fontWeight: 'bold'}"
-          >
-            <el-table-column prop="label" label="字段名称" width="180" align="center" />
-            <el-table-column prop="value" label="提取内容" min-width="300" align="left" />
-          </el-table>
-          
-          <!-- 完整文档内容 -->
-          <div class="content-section">
-            <h4 style="margin: 0 0 10px 0; color: #409eff;">📄 完整文档内容</h4>
-            <div class="document-content">
-              <pre>{{ previewData.content }}</pre>
-            </div>
-          </div>
-        </div>
-        
-        <!-- 其他文件类型使用 iframe 预览 -->
-        <iframe 
-          v-else-if="previewUrl && previewUrl.startsWith('http')" 
-          :src="previewUrl" 
-          class="preview-iframe"
-          frameborder="0"
-        ></iframe>
-        
-        <!-- 调试信息 -->
-        <div v-else style="padding: 20px; background: #f0f0f0;">
-          <p><strong>调试信息：</strong></p>
-          <p>previewData: {{ previewData }}</p>
-          <p>previewUrl: {{ previewUrl }}</p>
-        </div>
-      </div>
-      <template #footer>
-        <div class="dialog-footer">
-          <el-button @click="showPreviewDialog = false">关闭</el-button>
-          <el-button type="primary" @click="downloadPreviewFile">下载文件</el-button>
+          <el-button type="primary" @click="handleUpdateStatus">提交审批</el-button>
         </div>
       </template>
     </el-dialog>
@@ -305,14 +202,22 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/store/user'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, Plus, Upload, Loading, Warning, View, Edit, Delete, Download, RefreshRight, FolderOpened } from '@element-plus/icons-vue'
-import { getContractDetail, getContractExecutions, createContractExecution, deleteExecution, getContractDocuments, uploadDocument, deleteDocument, getContractLifecycle, updateContractStatus, archiveContract, requestStatusChange } from '@/api/contract'
-import { getApprovalRecords, createApproval } from '@/api/approval'
-import axios from 'axios'
+import { ArrowLeft, Delete, Download, FolderOpened, Plus, RefreshRight, UploadFilled } from '@element-plus/icons-vue'
+import {
+  commitTempDocument,
+  downloadTempDocument,
+  getContractDetail,
+  getContractDocuments,
+  getContractLifecycle,
+  updateContract,
+  uploadTempDocument
+} from '@/api/contract'
+import { createApproval, getApprovalRecords } from '@/api/approval'
+import { getCustomerDetail } from '@/api/customer'
 
 const route = useRoute()
 const router = useRouter()
@@ -320,227 +225,186 @@ const userStore = useUserStore()
 
 const activeTab = ref('info')
 const contract = ref({})
-const executions = ref([])
 const documents = ref([])
 const approvals = ref([])
-const executionsLoading = ref(false)
+const lifecycleEvents = ref([])
 const documentsLoading = ref(false)
 const approvalsLoading = ref(false)
-const lifecycleEvents = ref([])
-
-const showExecutionDialog = ref(false)
 const showApprovalDialog = ref(false)
 const showStatusDialog = ref(false)
-const showPreviewDialog = ref(false)
 const newStatus = ref('')
 const statusDescription = ref('')
-const executionFormRef = ref(null)
 const approvalFormRef = ref(null)
+const uploadingDocument = ref(false)
+const removingDocumentId = ref('')
 
-// 预览相关状态
-const previewUrl = ref('')
-const previewFileName = ref('')
-const previewLoading = ref(false)
-const previewError = ref('')
-const currentPreviewDocument = ref(null)
-const previewData = ref(null) // 存储解析后的文档数据
-
-const statusOptions = [
-  { value: 'draft', label: '草稿' },
-  { value: 'pending', label: '待审批' },
-  { value: 'approved', label: '已批准' },
-  { value: 'active', label: '已生效' },
-  { value: 'in_progress', label: '执行中' },
-  { value: 'pending_pay', label: '待付款' },
-  { value: 'completed', label: '已完成' },
-  { value: 'terminated', label: '已终止' }
-]
-
-const executionForm = reactive({
-  stage: '',
-  stage_date: '',
-  progress: 0,
-  payment_amount: 0,
-  payment_date: '',
-  description: ''
-})
+const contractId = computed(() => String(route.params.id || ''))
+const canCreateApproval = computed(() => contract.value?.status !== 'archived')
 
 const approvalForm = reactive({
+  request_type: 'status_change',
+  to_status: 'active',
   comment: ''
 })
 
-const executionRules = {
-  stage: [{ required: true, message: '请输入阶段名称', trigger: 'blur' }]
-}
-
 const approvalRules = {
-  comment: [{ required: true, message: '请输入审批意见', trigger: 'blur' }]
+  request_type: [{ required: true, message: '请选择审批类型', trigger: 'change' }],
+  to_status: [{ required: true, message: '请选择目标状态', trigger: 'change' }],
+  comment: [{ required: true, message: '请输入审批说明', trigger: 'blur' }]
 }
 
-const contractId = computed(() => parseInt(route.params.id))
-
-watch(() => route.params.id, () => {
-  if (route.params.id) {
-    loadContract()
-    loadExecutions()
-    loadDocuments()
-    loadApprovals()
-  }
+const statusOptions = computed(() => {
+  const currentStatus = contract.value?.status
+  const allOptions = [
+    { value: 'registered', label: '已登记', from: [''] },
+    { value: 'active', label: '生效中', from: ['registered', 'approved'] },
+    { value: 'in_progress', label: '履约中', from: ['active'] },
+    { value: 'pending_pay', label: '待付款', from: ['active', 'in_progress'] },
+    { value: 'completed', label: '已完成', from: ['active', 'in_progress', 'pending_pay'] },
+    { value: 'terminated', label: '已终止', from: ['registered', 'active', 'in_progress', 'pending_pay', 'completed'] },
+    { value: 'archived', label: '已归档', from: ['completed', 'terminated', 'active'] }
+  ]
+  return allOptions.filter((item) => !currentStatus || item.from.includes(currentStatus))
 })
 
-const contractAmount = computed(() => contract.value.amount || 0)
-
-watch(() => executionForm.payment_amount, (newVal) => {
-  if (contractAmount.value > 0) {
-    executionForm.progress = Math.round((newVal / contractAmount.value) * 100)
-  }
-})
-
-watch(() => executionForm.progress, (newVal) => {
-  if (contractAmount.value > 0) {
-    executionForm.payment_amount = Math.round((newVal / 100) * contractAmount.value * 100) / 100
-  }
-})
-
-const uploadUrl = computed(() => `/api/contracts/${contractId.value}/documents`)
-const uploadHeaders = computed(() => ({ Authorization: `Bearer ${userStore.token}` }))
-
-const API_BASE = '/api'
-const uploadData = computed(() => ({ contract_id: contractId.value }))
+const getAvailableStatusOptions = () => statusOptions.value
 
 const getStatusType = (status) => {
-  const map = { 
-    draft: 'info', 
-    pending: 'warning', 
-    approved: 'success', 
+  const map = {
+    registered: 'info',
+    approved: 'success',
     active: 'primary',
     in_progress: 'primary',
     pending_pay: 'warning',
-    completed: 'success', 
+    completed: 'success',
     terminated: 'danger',
     archived: 'info'
   }
-  return map[status] || ''
+  return map[status] || 'info'
 }
 
 const getStatusText = (status) => {
-  const map = { 
-    draft: '草稿', 
-    pending: '待审批', 
-    approved: '已批准', 
-    active: '已生效',
-    in_progress: '执行中',
+  const map = {
+    registered: '已登记',
+    approved: '已审批',
+    active: '生效中',
+    in_progress: '履约中',
     pending_pay: '待付款',
-    completed: '已完成', 
+    completed: '已完成',
     terminated: '已终止',
     archived: '已归档'
   }
-  return map[status] || status
+  return map[status] || status || '-'
 }
 
 const getLifecycleItemType = (eventType) => {
   const map = {
-    created: 'primary',
-    submitted: 'warning',
-    approved: 'success',
-    rejected: 'danger',
-    activated: 'success',
-    progress: 'primary',
-    payment: 'warning',
-    completed: 'success',
-    terminated: 'danger',
-    archived: 'info',
-    status_changed: 'info'
+    'contract.created': 'primary',
+    'contract.intake.created': 'primary',
+    'contract.status_changed': 'warning',
+    'contract.amendment_applied': 'success',
+    'contract.updated': 'warning'
   }
   return map[eventType] || 'info'
 }
 
 const getLifecycleTitle = (eventType) => {
   const map = {
-    created: '合同创建',
-    submitted: '提交审批',
-    approved: '审批通过',
-    rejected: '审批拒绝',
-    activated: '合同生效',
-    progress: '执行进度更新',
-    payment: '付款记录',
-    completed: '合同完成',
-    terminated: '合同终止',
-    archived: '合同归档',
-    status_changed: '状态变更'
+    'contract.created': '合同创建',
+    'contract.intake.created': '合同入库',
+    'contract.status_changed': '状态变更',
+    'contract.amendment_applied': '补充协议生效',
+    'contract.updated': '合同信息更新'
   }
-  return map[eventType] || eventType
+  return map[eventType] || eventType || '-'
 }
 
 const getApprovalStatusType = (status) => {
   const map = { pending: 'warning', approved: 'success', rejected: 'danger' }
-  return map[status] || ''
+  return map[status] || 'info'
 }
 
 const getApprovalStatusText = (status) => {
-  const map = { pending: '待审批', approved: '已批准', rejected: '已拒绝' }
-  return map[status] || status
+  const map = { pending: '待审批', approved: '已通过', rejected: '已驳回' }
+  return map[status] || status || '-'
 }
 
-const getProgressColor = (progress) => {
-  if (progress < 30) return '#EF4444'
-  if (progress < 70) return '#F59E0B'
-  return '#10B981'
+const getApprovalRequestTypeText = (type) => {
+  const map = {
+    status_change: '状态变更',
+    plan_adjustment: '履约计划调整',
+    archive_borrow: '档案借阅',
+    archive_destroy: '档案销毁'
+  }
+  return map[type] || type || '-'
 }
 
-const formatFileSize = (bytes) => {
-  if (!bytes) return '-'
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+const getApprovalRequestTypeTag = (type) => {
+  const map = {
+    status_change: 'warning',
+    plan_adjustment: 'primary',
+    archive_borrow: 'success',
+    archive_destroy: 'danger'
+  }
+  return map[type] || 'info'
 }
 
 const formatDateTime = (dateStr) => {
   if (!dateStr) return '-'
   const date = new Date(dateStr)
-  if (isNaN(date.getTime())) return dateStr
-  
+  if (Number.isNaN(date.getTime())) return dateStr
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
-  const hours = date.getHours()
+  const hours = String(date.getHours()).padStart(2, '0')
   const minutes = String(date.getMinutes()).padStart(2, '0')
-  
-  const ampm = hours < 12 ? '上午' : '下午'
-  const hour12 = hours % 12 || 12
-  
-  return `${year}-${month}-${day} ${ampm}${hour12}:${minutes}`
+  return `${year}-${month}-${day} ${hours}:${minutes}`
 }
 
-const formatDate = (dateStr) => {
-  if (!dateStr) return '-'
-  const date = new Date(dateStr)
-  if (isNaN(date.getTime())) return dateStr
-  
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  
-  return `${year}-${month}-${day}`
+const formatFileSize = (bytes) => {
+  if (!bytes) return '-'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-const loadContract = async () => {
-  contract.value = await getContractDetail(contractId.value)
-}
-
-const loadExecutions = async () => {
-  executionsLoading.value = true
-  try {
-    executions.value = await getContractExecutions(contractId.value)
-  } finally {
-    executionsLoading.value = false
+const parseDownloadFileName = (contentDisposition, fallbackName) => {
+  const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)
+  if (utf8Match?.[1]) {
+    return decodeURIComponent(utf8Match[1])
   }
+  const plainMatch = contentDisposition.match(/filename="?([^"]+)"?/i)
+  if (plainMatch?.[1]) {
+    return plainMatch[1]
+  }
+  return fallbackName || 'document'
+}
+
+const mergeCounterpartyName = async (data) => {
+  if (!data?.counterparty_id) return data
+  try {
+    const counterparty = await getCustomerDetail(data.counterparty_id)
+    return {
+      ...data,
+      counterparty_name: counterparty?.name || data.counterparty_name
+    }
+  } catch {
+    return {
+      ...data,
+      counterparty_name: data.counterparty_name || ''
+    }
+  }
+}
+
+const reloadContract = async () => {
+  contract.value = await mergeCounterpartyName(await getContractDetail(contractId.value))
 }
 
 const loadDocuments = async () => {
   documentsLoading.value = true
   try {
-    documents.value = await getContractDocuments(contractId.value)
+    const data = await getContractDocuments(contractId.value)
+    documents.value = Array.isArray(data) ? data : []
   } finally {
     documentsLoading.value = false
   }
@@ -557,54 +421,116 @@ const loadApprovals = async () => {
 
 const loadLifecycle = async () => {
   try {
-    lifecycleEvents.value = await getContractLifecycle(contractId.value)
+    const data = await getContractLifecycle(contractId.value)
+    lifecycleEvents.value = Array.isArray(data) ? data : []
   } catch (error) {
-    console.error('加载生命周期记录失败:', error)
+    console.error('Failed to load lifecycle:', error)
   }
 }
 
-const handleUpdateStatus = async () => {
+const reloadDocumentSection = async () => {
+  await reloadContract()
+  await loadDocuments()
+}
+
+const updateDocumentBindings = async (documentIds) => {
+  await updateContract(contractId.value, {
+    title: contract.value.title,
+    counterparty_id: contract.value.counterparty_id,
+    document_ids: documentIds
+  })
+}
+
+const handleSelectDocument = async (file) => {
+  uploadingDocument.value = true
   try {
-    const res = await requestStatusChange(contractId.value, {
+    const uploaded = await uploadTempDocument(file)
+    await commitTempDocument(uploaded.id)
+    const nextDocumentIDs = [...new Set([...(contract.value.document_ids || []), uploaded.id])]
+    await updateDocumentBindings(nextDocumentIDs)
+    ElMessage.success('附件上传并绑定成功')
+    await reloadDocumentSection()
+  } catch (error) {
+    ElMessage.error(error.response?.data?.error || '附件上传失败')
+  } finally {
+    uploadingDocument.value = false
+  }
+  return false
+}
+
+const handleRemoveDocument = async (row) => {
+  await ElMessageBox.confirm('确定移除该附件吗？移除后会释放附件绑定状态。', '提示', {
+    confirmButtonText: '确定',
+    cancelButtonText: '取消',
+    type: 'warning'
+  })
+  removingDocumentId.value = row.id
+  try {
+    const nextDocumentIDs = (contract.value.document_ids || []).filter((id) => id !== row.id)
+    await updateDocumentBindings(nextDocumentIDs)
+    ElMessage.success('附件已移除')
+    await reloadDocumentSection()
+  } catch (error) {
+    ElMessage.error(error.response?.data?.error || '移除附件失败')
+  } finally {
+    removingDocumentId.value = ''
+  }
+}
+
+const openStatusDialog = () => {
+  newStatus.value = ''
+  statusDescription.value = ''
+  showStatusDialog.value = true
+}
+
+const getOperator = () => userStore.userInfo?.username || userStore.userInfo?.id || 'system'
+
+const handleUpdateStatus = async () => {
+  if (!newStatus.value) {
+    ElMessage.error('请选择目标状态')
+    return
+  }
+  try {
+    await createApproval({
+      contract_id: contractId.value,
+      request_type: 'status_change',
+      requested_by: getOperator(),
       to_status: newStatus.value,
-      reason: statusDescription.value
+      comment: statusDescription.value
     })
-    if (res.direct) {
-      ElMessage.success('状态更新成功')
-    } else {
-      ElMessage.success('状态变更申请已提交，等待管理员审批')
-    }
+    ElMessage.success('状态变更审批已提交')
     showStatusDialog.value = false
     newStatus.value = ''
     statusDescription.value = ''
-    loadContract()
-    loadLifecycle()
+    loadApprovals()
   } catch (error) {
-    ElMessage.error(error.response?.data?.error || '操作失败')
+    ElMessage.error(error.response?.data?.error || '提交失败')
   }
 }
 
 const handleArchive = async () => {
   try {
-    await ElMessageBox.confirm('归档操作需要管理员审批通过后生效，是否继续？', '合同归档', {
-      confirmButtonText: '确定申请',
-      cancelButtonText: '取消',
-      type: 'warning'
-    })
-    const res = await requestStatusChange(contractId.value, {
+    await ElMessageBox.confirm(
+      '归档通过审批子流程提交，审批通过后再进入归档链路，是否继续？',
+      '申请归档',
+      {
+        confirmButtonText: '确认提交',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+    await createApproval({
+      contract_id: contractId.value,
+      request_type: 'status_change',
+      requested_by: getOperator(),
       to_status: 'archived',
-      reason: '申请归档'
+      comment: '申请归档'
     })
-    if (res.direct) {
-      ElMessage.success('合同归档成功')
-    } else {
-      ElMessage.success('归档申请已提交，等待管理员审批')
-    }
-    loadContract()
-    loadLifecycle()
+    ElMessage.success('归档审批已提交')
+    loadApprovals()
   } catch (error) {
     if (error !== 'cancel') {
-      ElMessage.error(error.response?.data?.error || '操作失败')
+      ElMessage.error(error.response?.data?.error || '提交失败')
     }
   }
 }
@@ -613,174 +539,80 @@ const handleEdit = () => {
   router.push(`/contracts?action=edit&id=${contractId.value}`)
 }
 
-const handleSubmitExecution = async () => {
-  await executionFormRef.value.validate()
-  await createContractExecution({ ...executionForm, contract_id: contractId.value })
-  ElMessage.success('添加成功')
-  showExecutionDialog.value = false
-  Object.assign(executionForm, { stage: '', stage_date: '', progress: 0, payment_amount: 0, payment_date: '', description: '' })
-  loadExecutions()
+const handlePerformance = () => {
+  router.push(`/contracts/${contractId.value}/performance`)
 }
 
-const handleDeleteExecution = async (row) => {
-  await ElMessageBox.confirm('确定删除该执行记录?', '提示', { type: 'warning' })
-  await deleteExecution(row.id)
-  ElMessage.success('删除成功')
-  loadExecutions()
-}
-
-const handleBeforeUpload = (file) => {
-  const allowedExtensions = ['doc', 'docx', 'pdf', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'txt', 'html', 'htm', 'xls', 'xlsx']
-  const extension = file.name.split('.').pop().toLowerCase()
-  
-  if (!allowedExtensions.includes(extension)) {
-    ElMessage.error('不支持的文件格式')
-    return false
-  }
-  
-  const isLt10M = file.size / 1024 / 1024 < 10
-  if (!isLt10M) {
-    ElMessage.error('文件大小不能超过 10MB')
-    return false
-  }
-  return true
-}
-
-const handleUploadSuccess = () => {
-  ElMessage.success('上传成功')
-  loadDocuments()
-}
-
-const handleUploadError = () => {
-  ElMessage.error('上传失败')
-}
-
-// 从文本中提取合同关键信息并返回数组
-const extractContractFields = (text) => {
-  const fields = []
-  
-  // 定义所有要提取的字段及其正则表达式
-  const patterns = [
-    { label: '合同编号', pattern: /合同编号[：:]\s*([A-Z0-9\-]+)/ },
-    { label: '合同名称', pattern: /合同名称[：:]\s*([^\n]{2,60})/ },
-    { label: '甲方（客户）', pattern: /甲方[（(]?客户[）)]?[：:]\s*([^\n]{2,60})/ },
-    { label: '乙方', pattern: /乙方[：:]\s*([^\n]{2,60})/ },
-    { label: '合同金额', pattern: /合同金额[：:]\s*([\d,]+\.?\d*)\s*(?:元|万)?/ },
-    { label: '签订日期', pattern: /签订日期[：:]\s*(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}[日]?)/ },
-    { label: '开始日期', pattern: /开始日期[：:]\s*(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}[日]?)/ },
-    { label: '结束日期', pattern: /结束日期[：:]\s*(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}[日]?)/ },
-    { label: '合同类型', pattern: /合同类型[：:]\s*([^\n]{2,30})/ },
-    { label: '联系人', pattern: /联系人[：:]\s*([^\n]{2,20})/ },
-    { label: '联系电话', pattern: /(?:联系电话|电话)[：:]\s*([\d\-]{7,20})/ },
-    { label: '地址', pattern: /(?:地址)[：:]\s*([^\n]{5,100})/ },
-    { label: '开户银行', pattern: /开户银行[：:]\s*([^\n]{2,50})/ },
-    { label: '银行账号', pattern: /(?:银行账号|账号)[：:]\s*([\d]{10,30})/ },
-  ]
-  
-  // 提取每个字段
-  for (const item of patterns) {
-    const match = text.match(item.pattern)
-    if (match) {
-      fields.push({
-        label: item.label,
-        value: match[1].trim(),
-        found: true
-      })
-    }
-  }
-  
-  return fields
-}
-
-const handlePreview = async (row) => {
-  const fileExt = row.name.split('.').pop().toLowerCase()
-  const token = localStorage.getItem('token')
-  
-  // 存储当前预览的文档信息
-  currentPreviewDocument.value = row
-  previewFileName.value = row.name
-  previewError.value = ''
-  previewLoading.value = true
-  previewData.value = null
-  previewUrl.value = ''
-  
+const handleDownload = async (row) => {
   try {
-    // Word 文档 (.docx) 和文本文件
-    if (fileExt === 'docx' || fileExt === 'txt') {
-      const response = await axios.get(`/api/documents/${row.id}/preview`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-      
-      console.log('API响应类型:', typeof response.data)
-      console.log('API响应数据:', response.data)
-      console.log('content字段类型:', typeof response.data?.content)
-      console.log('content字段值:', response.data?.content)
-      
-      // 提取合同关键信息并生成表格数据
-      const contentText = response.data?.content || response.data
-      const fields = extractContractFields(contentText)
-      
-      previewData.value = {
-        content: contentText,
-        fields: fields
-      }
-      
-      console.log('previewData设置完成:', previewData.value)
-      showPreviewDialog.value = true
-    } else if (fileExt === 'pdf' || fileExt === 'jpg' || fileExt === 'jpeg' || 
-               fileExt === 'png' || fileExt === 'gif' || fileExt === 'bmp' || 
-               fileExt === 'webp' || fileExt === 'xls' || fileExt === 'xlsx') {
-      // 对于其他文件类型，使用 iframe 预览
-      previewUrl.value = `/api/documents/${row.id}/preview?token=${token}`
-      previewData.value = null
-      showPreviewDialog.value = true
-    } else {
-      ElMessage.warning(`不支持预览此文件类型 (${fileExt})，请下载查看`)
-    }
+    const { blob, contentDisposition } = await downloadTempDocument(row.id)
+    const url = window.URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = parseDownloadFileName(contentDisposition, row.name)
+    document.body.appendChild(anchor)
+    anchor.click()
+    document.body.removeChild(anchor)
+    window.URL.revokeObjectURL(url)
   } catch (error) {
-    console.error('预览错误:', error)
-    previewError.value = '预览失败: ' + (error.message || '未知错误')
-  } finally {
-    previewLoading.value = false
+    ElMessage.error(error.response?.data?.error || '附件下载失败')
   }
-}
-
-const handleDownload = (row) => {
-  window.open(row.file_path, '_blank')
-}
-
-const downloadPreviewFile = () => {
-  if (currentPreviewDocument.value) {
-    window.open(currentPreviewDocument.value.file_path, '_blank')
-  }
-}
-
-const handleDeleteDocument = async (row) => {
-  await ElMessageBox.confirm('确定删除该文档?', '提示', { type: 'warning' })
-  await deleteDocument(row.id)
-  ElMessage.success('删除成功')
-  loadDocuments()
 }
 
 const handleSubmitApproval = async () => {
   await approvalFormRef.value.validate()
-  await createApproval({ contract_id: contractId.value, status: 'pending', comment: approvalForm.comment })
-  ElMessage.success('提交成功')
+  const payload = approvalForm.request_type === 'plan_adjustment'
+    ? {
+        nodes: [
+          {
+            node_name: '待补充计划节点',
+            node_type: 'manual_adjustment',
+            due_date: new Date().toISOString()
+          }
+        ],
+        comment: approvalForm.comment
+      }
+    : {
+        status: approvalForm.to_status || 'active',
+        comment: approvalForm.comment
+      }
+
+  await createApproval({
+    contract_id: contractId.value,
+    request_type: approvalForm.request_type,
+    requested_by: getOperator(),
+    to_status: approvalForm.to_status,
+    payload,
+    comment: approvalForm.comment
+  })
+
+  ElMessage.success('审批已发起')
   showApprovalDialog.value = false
+  approvalForm.request_type = 'status_change'
+  approvalForm.to_status = 'active'
   approvalForm.comment = ''
   loadApprovals()
 }
 
 const tabChange = (tab) => {
-  if (tab === 'executions') loadExecutions()
   if (tab === 'documents') loadDocuments()
   if (tab === 'approvals') loadApprovals()
   if (tab === 'lifecycle') loadLifecycle()
 }
 
+watch(() => route.params.id, () => {
+  if (route.params.id) {
+    reloadContract()
+    loadDocuments()
+    loadApprovals()
+    loadLifecycle()
+  }
+})
+
 onMounted(async () => {
-  await loadContract()
+  await reloadContract()
   loadApprovals()
+  loadLifecycle()
 })
 </script>
 
@@ -796,25 +628,35 @@ onMounted(async () => {
   width: 100%;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.title {
+  font-size: 18px;
+  font-weight: 600;
+}
+
 .tab-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 16px;
   font-weight: 600;
-  color: #1E293B;
+  color: #1e293b;
 }
 
-.action-buttons {
+.document-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 12px;
 }
 
-.action-buttons .el-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+.hint-text {
+  font-size: 12px;
+  color: #909399;
 }
 
 .status-actions {
@@ -824,6 +666,13 @@ onMounted(async () => {
   margin-left: 12px;
 }
 
+.action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.action-buttons .el-button,
 .status-actions .el-button {
   display: inline-flex;
   align-items: center;
@@ -836,67 +685,19 @@ onMounted(async () => {
   gap: 12px;
 }
 
-.preview-container {
-  width: 100%;
-  height: 70vh;
-  min-height: 400px;
-  border: 1px solid #e0e0e0;
-  border-radius: 4px;
-  overflow: hidden;
-  background: #f5f5f5;
-}
-
-.preview-iframe {
-  width: 100%;
-  height: 100%;
-  border: none;
-}
-
-.preview-loading,
-.preview-error {
+.lifecycle-content {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  color: #666;
-  gap: 16px;
+  gap: 4px;
 }
 
-.preview-error {
-  color: #f56c6c;
+.lifecycle-title {
+  font-weight: 600;
+  color: #303133;
 }
 
-.preview-loading .el-icon,
-.preview-error .el-icon {
-  font-size: 48px;
-}
-
-.content-preview {
-  height: 100%;
-  overflow-y: auto;
-  padding: 0;
-}
-
-.content-section {
-  margin-top: 10px;
-}
-
-.document-content {
-  background: #f8f9fa;
-  padding: 16px;
-  border-radius: 4px;
-  max-height: 400px;
-  overflow-y: auto;
-  border: 1px solid #e4e7ed;
-}
-
-.document-content pre {
-  margin: 0;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  font-family: 'Courier New', Courier, monospace;
-  font-size: 13px;
+.lifecycle-desc {
+  color: #606266;
   line-height: 1.6;
 }
 </style>

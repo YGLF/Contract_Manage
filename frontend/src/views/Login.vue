@@ -3,20 +3,9 @@
     <div class="login-left">
       <div class="brand-section">
         <div class="brand-logo">
-          <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <rect width="48" height="48" rx="12" fill="url(#logoGrad)"/>
-            <path d="M14 16h20v4H14zM14 24h16v4H14zM14 32h20v4H14z" fill="white" opacity="0.9"/>
-            <circle cx="36" cy="36" r="8" fill="white" opacity="0.2"/>
-            <defs>
-              <linearGradient id="logoGrad" x1="0" y1="0" x2="48" y2="48">
-                <stop stop-color="#6366F1"/>
-                <stop offset="1" stop-color="#8B5CF6"/>
-              </linearGradient>
-            </defs>
-          </svg>
+          <img src="/log.png" alt="logo" class="logo-img" />
         </div>
-        <h1 class="brand-title">安信合同</h1>
-        <p class="brand-subtitle">智能合同管理解决方案</p>
+        <h1 class="brand-title">安信合同管理</h1>
       </div>
       
       <div class="features-list">
@@ -80,7 +69,7 @@
           
           <div class="login-options">
             <el-checkbox v-model="rememberMe">记住我</el-checkbox>
-            <a href="#" class="forgot-link">忘记密码？</a>
+            <!-- <a href="#" class="forgot-link">忘记密码？</a> -->
           </div>
           
           <el-form-item>
@@ -96,14 +85,16 @@
           </el-form-item>
         </el-form>
         
+        <!-- 注册功能暂不开放
         <div class="register-prompt">
           <span>还没有账号？</span>
           <router-link to="/register">立即注册</router-link>
         </div>
+        -->
       </div>
       
       <div class="login-footer">
-        <p>© 2024 安信合同管理系统 · 保留所有权利</p>
+        <p>© 2026 安信合同管理系统 · 保留所有权利</p>
       </div>
     </div>
   </div>
@@ -116,6 +107,15 @@ import { ElMessage } from 'element-plus'
 import { Document, Clock, DataLine, User, Lock, Right } from '@element-plus/icons-vue'
 import { login } from '@/api/auth'
 import { useUserStore } from '@/store/user'
+
+// SHA-256杂凑函数
+const sha256 = async (str) => {
+  const encoder = new TextEncoder()
+  const data = encoder.encode(str)
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+  const hashArray = Array.from(new Uint8Array(hashBuffer))
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
+}
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -141,13 +141,43 @@ const handleLogin = async () => {
     if (valid) {
       loading.value = true
       try {
-        const res = await login(loginForm)
+        // 对密码进行SHA-256杂凑
+        const passwordHash = await sha256(loginForm.password)
+        // 同时发送原始密码（用于bcrypt验证）和SHA-256杂凑值（用于杂凑比对）
+        const loginData = {
+          username: loginForm.username,
+          password: loginForm.password,
+          password_hash: passwordHash
+        }
+        const res = await login(loginData)
         userStore.setToken(res.access_token)
         userStore.setUserInfo(res.user_info || { username: loginForm.username, role: 'user' })
-        ElMessage.success({ message: '欢迎回来！', duration: 2000 })
+        // 存储通知信息
+        if (res.notifications) {
+          userStore.setNotifications(res.notifications, res.unread_count || 0)
+        }
+        // 登录成功后检测并提示通知
+        if (res.unread_count > 0) {
+          const notificationType = res.notifications?.[0]?.type
+          let msg = `您有 ${res.unread_count} 条未读通知`
+          if (notificationType === 'pending_approval') {
+            msg = `您有 ${res.unread_count} 条待审批合同，请及时处理`
+          } else if (notificationType === 'approval_reminder') {
+            msg = `您有 ${res.unread_count} 条审批提醒`
+          } else if (notificationType === 'approved') {
+            msg = `您有 ${res.unread_count} 条审批通过通知`
+          } else if (notificationType === 'rejected') {
+            msg = `您有 ${res.unread_count} 条审批拒绝通知`
+          }
+          ElMessage.warning({ message: msg, duration: 4000 })
+        } else {
+          ElMessage.success({ message: '欢迎回来！', duration: 2000 })
+        }
         router.push('/')
       } catch (error) {
         console.error('登录失败:', error)
+        const errorMsg = error.response?.data?.error || '登录失败，请检查用户名和密码'
+        ElMessage.error(errorMsg)
       } finally {
         loading.value = false
       }
@@ -206,9 +236,10 @@ const handleLogin = async () => {
   margin-bottom: 24px;
 }
 
-.brand-logo svg {
+.logo-img {
   width: 100%;
   height: 100%;
+  object-fit: contain;
 }
 
 .brand-title {

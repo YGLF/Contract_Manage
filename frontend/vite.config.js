@@ -4,6 +4,13 @@ import { resolve } from 'path'
 
 export default defineConfig({
   plugins: [vue()],
+  build: {
+    rollupOptions: {
+      input: {
+        app: resolve(__dirname, 'index.html')
+      }
+    }
+  },
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src')

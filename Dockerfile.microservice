@@ -1,0 +1,28 @@
+FROM golang:1.21 AS builder
+
+ARG SERVICE_NAME
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY cmd ./cmd
+COPY config ./config
+COPY crypto ./crypto
+COPY internal ./internal
+COPY pkg ./pkg
+
+RUN test -n "${SERVICE_NAME}" && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/service ./cmd/${SERVICE_NAME}
+
+FROM alpine:3.20
+
+RUN apk add --no-cache ca-certificates wget && \
+    addgroup -S app && adduser -S -G app appuser
+WORKDIR /app
+RUN mkdir -p /app/uploads && chown -R appuser:app /app
+
+COPY --from=builder /out/service /app/service
+
+USER appuser
+ENTRYPOINT ["/app/service"]

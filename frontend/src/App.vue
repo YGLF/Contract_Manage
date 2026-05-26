@@ -3,6 +3,80 @@
 </template>
 
 <script setup>
+import { onMounted, onUnmounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { useUserStore } from '@/store/user'
+import { ElMessageBox, ElMessage } from 'element-plus'
+
+const router = useRouter()
+const userStore = useUserStore()
+let lastActivityTime = Date.now()
+let checkInterval = null
+let warningShown = false
+let logoutCalled = false
+
+const TIMEOUT_MINUTES = 30
+const WARNING_MINUTES = 28
+
+const resetActivity = () => {
+  if (!userStore.token) return
+  lastActivityTime = Date.now()
+  warningShown = false
+  logoutCalled = false
+}
+
+const checkTimeout = () => {
+  if (!userStore.token || logoutCalled) return
+  
+  const inactiveMinutes = (Date.now() - lastActivityTime) / 1000 / 60
+  
+  if (inactiveMinutes >= TIMEOUT_MINUTES) {
+    logoutCalled = true
+    ElMessage.warning('登录已超时，请重新登录')
+    userStore.logout()
+    window.location.href = '/login'
+  } else if (inactiveMinutes >= WARNING_MINUTES && !warningShown) {
+    warningShown = true
+    ElMessageBox.confirm(
+      '您已超过28分钟未操作，系统将在2分钟后自动退出，是否继续使用？', 
+      '即将超时', 
+      {
+        confirmButtonText: '继续使用',
+        cancelButtonText: '退出',
+        distinguishCancelAndClose: true,
+        type: 'warning'
+      }
+    ).then(() => {
+      resetActivity()
+    }).catch((action) => {
+      if (action === 'cancel' || action === 'close') {
+        logoutCalled = true
+        userStore.logout()
+        window.location.href = '/login'
+      }
+    })
+  }
+}
+
+const activityEvents = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click', 'input']
+
+onMounted(() => {
+  activityEvents.forEach(event => {
+    document.addEventListener(event, resetActivity, { passive: true })
+  })
+  
+  checkInterval = setInterval(checkTimeout, 60000)
+})
+
+onUnmounted(() => {
+  activityEvents.forEach(event => {
+    document.removeEventListener(event, resetActivity)
+  })
+  
+  if (checkInterval) {
+    clearInterval(checkInterval)
+  }
+})
 </script>
 
 <style>

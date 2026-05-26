@@ -45,3 +45,24 @@ export const deleteUser = (id) => {
     method: 'delete'
   })
 }
+
+export const resetUserPassword = (id) => {
+  return request({
+    url: `/auth/users/${id}/reset-password`,
+    method: 'post'
+  })
+}
+
+export const unlockUser = (id) => {
+  return request({
+    url: `/auth/users/${id}/unlock`,
+    method: 'post'
+  })
+}
+
+export const getUserLockStatus = (id) => {
+  return request({
+    url: `/auth/users/${id}/lock-status`,
+    method: 'get'
+  })
+}

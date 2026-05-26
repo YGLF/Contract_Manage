@@ -13,8 +13,8 @@
         </el-form-item>
       </el-form>
 
-      <el-table :data="tableData" style="width: 100%" v-loading="loading">
-        <el-table-column prop="contract_no" label="合同编号" width="150" />
+<el-table :data="tableData" style="width: 100%" v-loading="loading" :cell-style="{ padding: '8px 0' }">
+  <el-table-column prop="contract_no" label="合同编号" width="150" />
         <el-table-column prop="title" label="合同标题" />
         <el-table-column prop="amount" label="金额" width="120">
           <template #default="{ row }">
@@ -33,10 +33,10 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="操作" width="120" fixed="right">
           <template #default="{ row }">
-            <el-button type="primary" link @click="handleCreateReminder(row)">
-              <el-icon><Bell /></el-icon> 创建提醒
+            <el-button type="primary" size="small" @click="handleViewDetail(row)">
+              <el-icon><View /></el-icon>查看详情
             </el-button>
           </template>
         </el-table-column>
@@ -79,9 +79,12 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Bell } from '@element-plus/icons-vue'
+import { Bell, View } from '@element-plus/icons-vue'
 import { getExpiringContracts, createReminder } from '@/api/approval'
+
+const router = useRouter()
 
 const formatDate = (dateStr) => {
   if (!dateStr) return '-'
@@ -129,6 +132,10 @@ const handleCreateReminder = async (row) => {
   formData.contract_id = row.id
   formData.reminder_date = ''
   dialogVisible.value = true
+}
+
+const handleViewDetail = (row) => {
+  router.push(`/contracts/${row.id}`)
 }
 
 const handleSubmit = async () => {
